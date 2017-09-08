@@ -17,7 +17,7 @@ define topurg ranger
   size [ 0.05 0.05 0.1 ]
 )
 
-define erratic position
+define minibot position
 (
   #size [0.415 0.392 0.25]
   size [0.35 0.35 0.25]
@@ -26,6 +26,18 @@ define erratic position
   drive "diff"
   topurg(pose [ 0.050 0.000 0 0.000 ])
 )
+
+define sensorTower position
+( 
+  #size [0.415 0.392 0.25]
+  size [0.35 0.35 1.25]
+  origin [-0.05 0 0 0]
+  gui_nose 1
+  drive "diff"
+  topurg(pose [ 0.050 0.000 0 0.000 ])
+)
+
+
 
 define floorplan model
 (
@@ -63,13 +75,10 @@ floorplan
 ( 
   name "willow"
   bitmap "SuperStage.png"
-  size [54.0 58.7 0.5]
-  pose [ -29.350 27.000 0 90.000 ]
+  size [14.0 18.7 0.5]
+  pose [ -9.350 27.000 0 90.000 ]
 )
 
 # throw in two robots
-erratic( pose [ -11.277 23.266 0 180.000 ] name "era" color "blue")
-erratic( pose [ -13.277 22.266 0 180.000 ] name "era2" color "blue")
-erratic( pose [ -13.277 23.266 0 180.000 ] name "era3" color "blue")
-erratic( pose [ -11.277 22.266 0 180.000 ] name "era4" color "blue")
-block( pose [ -13.924 25.020 0 180.000 ] color "red")
+minibot( pose [ -11.277 23.266 0 180.000 ] name "minibot" color "blue")
+sensorTower( pose [ -13.277 22.266 0 180.000 ] name "sensorTower" color "green")
