@@ -6,6 +6,7 @@
 * http://pointclouds.org/documentation/tutorials/planar_segmentation.php#planar-segmentation
 * http://pointclouds.org/documentation/tutorials/extract_indices.php#extract-indices
 * http://docs.pointclouds.org/trunk/classpcl_1_1_extract_indices.html#details
+*https://github.com/arunavanag591/tabletop_operation
 */
 
 #include <ros/ros.h>
@@ -50,10 +51,9 @@ ros::Publisher pub8;
 
 bool downsample;
 bool passthrough;
-std::string passthrough_filter_axis;
 float passthrough_lower_lim;
 float passthrough_upper_lim;
-
+const char *passthrough_filter_axis = "y";
 
 float leaf_size;
 
@@ -65,9 +65,11 @@ float distThres;
 float cluster_tolerance;
 int min_cluster_size;
 int max_cluster_size;
+float hull_alpha;
 
 
-void downsample_cloud(const pcl::PCLPointCloud2ConstPtr& input_cloud, pcl::PCLPointCloud2& output_cloud, float leaf_size, ros::Publisher &pub, bool publish)
+void downsample_cloud(const pcl::PCLPointCloud2ConstPtr& input_cloud, pcl::PCLPointCloud2& output_cloud, float leaf_size,
+                      ros::Publisher &pub, bool publish)
 {
 	/* downsamples the input cloud using a VoxelGrid algorithm down to the specified leaf size
 	* and then can publish this on the specified publisher based on the boolean value of publish.
@@ -85,7 +87,21 @@ void downsample_cloud(const pcl::PCLPointCloud2ConstPtr& input_cloud, pcl::PCLPo
     }
 }
 
-void remove_statistical_outliers(pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud, pcl::PointCloud<pcl::PointXYZ>& output_cloud, float meanK, float stdDevThres, ros::Publisher &pub, bool publish)
+void passthrough_filter(pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud, const char *axis, float lower_lim, float upper_lim)
+{
+  pcl::PointCloud<pcl::PointXYZ> xyz_intermediate;
+  pcl::PassThrough<pcl::PointXYZ> pass;
+  pass.setInputCloud(input_cloud);
+  pass.setFilterFieldName(axis);  // apparently this was the problem.
+  pass.setFilterLimits(lower_lim, upper_lim);
+  pass.filter(xyz_intermediate);
+
+  input_cloud = xyz_intermediate.makeShared();
+}
+
+void remove_statistical_outliers(pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud,
+                                 pcl::PointCloud<pcl::PointXYZ>& output_cloud, float meanK, float stdDevThres,
+                                 ros::Publisher &pub, bool publish)
 {
   pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor2;
   sor2.setInputCloud(input_cloud);
@@ -99,9 +115,13 @@ void remove_statistical_outliers(pcl::PointCloud<pcl::PointXYZ>::Ptr& input_clou
   }
 }
 
-void segment_plane_and_extract_indices(pcl::PointCloud<pcl::PointXYZ>::Ptr& planar_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr& indices_cloud,
-  pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud_f, pcl::ModelCoefficients::Ptr& coefficients, pcl::PointIndices::Ptr& inliers, pcl::PointIndices::Ptr& outliers,
-  ros::Publisher &pub1, ros::Publisher &pub2, ros::Publisher &pub3, bool publish_planar, bool publish_indices, bool publish_filtered)
+void segment_plane_and_extract_indices(pcl::PointCloud<pcl::PointXYZ>::Ptr& planar_cloud,
+                                       pcl::PointCloud<pcl::PointXYZ>::Ptr& indices_cloud,
+                                       pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud_f,
+                                       pcl::ModelCoefficients::Ptr& coefficients, pcl::PointIndices::Ptr& inliers,
+                                       pcl::PointIndices::Ptr& outliers,
+                                       ros::Publisher &pub1, ros::Publisher &pub2, ros::Publisher &pub3,
+                                       bool publish_planar, bool publish_indices, bool publish_filtered)
 {
   pcl::SACSegmentation<pcl::PointXYZ> seg;
   seg.setOptimizeCoefficients (true);
@@ -155,8 +175,10 @@ void segment_plane_and_extract_indices(pcl::PointCloud<pcl::PointXYZ>::Ptr& plan
 
 }
 
-void extract_euclidian_clusters(pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud, std::vector<pcl::PointIndices>& cluster_indices, float cluster_tolerance,
-   int min_cluster_size, int max_cluster_size, pcl::search::KdTree<pcl::PointXYZ>::Ptr& search_method)
+void extract_euclidian_clusters(pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud,
+                                std::vector<pcl::PointIndices>& cluster_indices, float cluster_tolerance,
+                                int min_cluster_size, int max_cluster_size,
+                                pcl::search::KdTree<pcl::PointXYZ>::Ptr& search_method)
 {
   pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
   ec.setClusterTolerance (cluster_tolerance);  // too high means multiple objects in cluster, too low mean multiple clusters per object
@@ -168,6 +190,34 @@ void extract_euclidian_clusters(pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud
   //extract the indices of the clusters
   ec.extract (cluster_indices);
 }
+
+void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &cloud_f,
+                          std::vector<pcl::PointIndices> &cluster_indices,
+                          pcl::PointCloud<pcl::PointXYZ>::Ptr &clustered_cloud, int &j)
+{
+  j= 0;
+  for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
+  {
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cluster (new pcl::PointCloud<pcl::PointXYZ>);
+    for (std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); ++pit)
+    {
+      cloud_cluster->points.push_back (cloud_f->points[*pit]);
+    }
+    j += 1;
+
+    // TODO: Fine-tune the parameters and determine concave vs convex hull
+    // ---------- convex hull -----------------
+    pcl::ConcaveHull<pcl::PointXYZ> hull;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr convexHull (new pcl::PointCloud<pcl::PointXYZ>);
+
+    hull.setInputCloud(cloud_cluster);
+    hull.setAlpha(hull_alpha);
+    hull.reconstruct(*convexHull);
+
+    *clustered_cloud += *convexHull;
+  }
+}
+
 
 void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 {
@@ -182,7 +232,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   pcl::PointCloud<pcl::PointXYZ> xyz_cloud_filtered;
 
 
-  if (downsample)  // downsample?
+  if (downsample)
   {
   	pcl::PCLPointCloud2 cloud_filtered;
     downsample_cloud(cloudPtr, cloud_filtered, leaf_size, downsample_publisher, true);
@@ -194,23 +244,16 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
     pcl::fromPCLPointCloud2(*cloud, *xyz_cloud);  // Convert from PCLPointCloud2 to PointCloud<PointXYZ>
   }
 
-  if (passthrough)  // TODO: extract this into a function
+  if (passthrough)
   {
-    pcl::PointCloud<pcl::PointXYZ> xyz_intermediate;
-    pcl::PassThrough<pcl::PointXYZ> pass;
-    pass.setInputCloud(xyz_cloud);
-    pass.setFilterFieldName("y");  // apparently this was the problem.
-    pass.setFilterLimits(passthrough_lower_lim, passthrough_upper_lim);
-    pass.filter(xyz_intermediate);
-
-    xyz_cloud = xyz_intermediate.makeShared();
+    passthrough_filter(xyz_cloud, passthrough_filter_axis, passthrough_lower_lim, passthrough_upper_lim);
   }
 
-  //----- Statistical Outlier Removal section -------
+
 
   remove_statistical_outliers(xyz_cloud, xyz_cloud_filtered, meanK, stdDevThres, statistical_outlier_publisher, true);
 
-  //--------- end statistical outlier section ------
+
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr planar_cloud (xyz_cloud_filtered.makeShared());
   pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
@@ -220,11 +263,10 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_f (xyz_cloud_filtered.makeShared());
 
   segment_plane_and_extract_indices(planar_cloud, indices_cloud, cloud_f, coefficients, inliers, outliers,
-    planar_cloud_publisher, indices_cloud_publisher, filtered_cloud_publisher, true, true, true);
+                                    planar_cloud_publisher, indices_cloud_publisher, filtered_cloud_publisher,
+                                    true, true, true);
 
-  // -------- End Planar Segmentation -------
 
-  // -------- Begin Euclidian Cluster Extraction -------
 
   pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
   tree->setInputCloud (cloud_f);
@@ -232,47 +274,21 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   std::vector<pcl::PointIndices> cluster_indices;  // each entry is a vector of indices_cloud
 
   extract_euclidian_clusters(cloud_f, cluster_indices, cluster_tolerance, min_cluster_size, max_cluster_size, tree);
-  // set parameters
 
-  // TODO: Extract the following into a function.
 
-  // now we have to iterate through the returned vector
-  // https://github.com/arunavanag591/tabletop_operation
   pcl::PointCloud<pcl::PointXYZ>::Ptr clustered_cloud (new pcl::PointCloud<pcl::PointXYZ>);
   sensor_msgs::PointCloud2::Ptr clusters (new sensor_msgs::PointCloud2);
-  // ------- end Euclidian Cluster Extraction -------------
 
-  // ------- create a cloud for the clusters --------------
-  int j = 0;
-  for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
-  {
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cluster (new pcl::PointCloud<pcl::PointXYZ>);
-    for (std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); ++pit)
-    {
-      cloud_cluster->points.push_back (cloud_f->points[*pit]);
-    }
-    //cloud_cluster->width = cloud_cluster->points.size();
-    //cloud_cluster->height = 1;
-    //cloud_cluster->is_dense = true;
-    j += 1;
+  int cluster_count;
+  create_cluster_cloud(cloud_f, cluster_indices, clustered_cloud, cluster_count);
 
-    // ---------- convex hull ----------------- (NOT WORKING RIGHT)
-    pcl::ConcaveHull<pcl::PointXYZ> hull;
-    pcl::PointCloud<pcl::PointXYZ>::Ptr convexHull (new pcl::PointCloud<pcl::PointXYZ>);
-
-    hull.setInputCloud(cloud_cluster);
-    hull.setAlpha(180.0);  // TODO: make a variable for this
-    hull.reconstruct(*convexHull);
-
-    *clustered_cloud += *convexHull;
-  }
 
   // -------- Publish results --------------
   pcl::toROSMsg(*clustered_cloud, *clusters);  // this probably isn't necessary
   clusters->header.frame_id = "/kinect2_link";
   clusters->header.stamp = ros::Time::now();
   pub8.publish(clusters);
-  std::cout << "clusters found: " << j << std::endl;
+  std::cout << "clusters found: " << cluster_count << std::endl;
 
 }
 
@@ -284,7 +300,7 @@ int main (int argc, char** argv)
 
   downsample = true;  // this should really be set as an argument to the program...
   passthrough = true;  // do we wanna cut things out?
-  const std::string passthrough_filter_axis = "y";
+
   passthrough_lower_lim = -1.0;
   passthrough_upper_lim = 0.7;
 
@@ -299,6 +315,7 @@ int main (int argc, char** argv)
   cluster_tolerance = 0.05;  // 5 cm
   min_cluster_size = 5;
   max_cluster_size = 2000;
+  hull_alpha = 180.0;
 
   // Create a ROS subscriber for the input point cloud
   ros::Subscriber sub = nh.subscribe ("/kinect2/qhd/points", 2, cloud_cb);

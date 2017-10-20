@@ -202,21 +202,5 @@ include_directories(
 
 include_directories(include ${catkin_INCLUDE_DIRS})
 
-add_executable(listener src/listener.cpp)
-target_link_libraries(listener ${catkin_LIBRARIES})
-# add_dependencies(listener beginner_tutorials_generate_messages_cpp)
-
-add_executable(voxel_grid src/voxel_grid.cpp)
-target_link_libraries(voxel_grid ${catkin_LIBRARIES})
-
-add_executable(listener2 src/listener2.cpp)
-target_link_libraries(listener2 ${catkin_LIBRARIES})
-
-add_executable(statistical_outlier src/statistical_outlier.cpp)
-target_link_libraries(statistical_outlier ${catkin_LIBRARIES})
-
-add_executable(planar_segmentation src/planar_segmentation.cpp)
-target_link_libraries(planar_segmentation ${catkin_LIBRARIES})
-
-add_executable(unoptimized src/unoptimized.cpp)
-target_link_libraries(unoptimized ${catkin_LIBRARIES})
+add_executable(obstacle_detection src/obstacle_detection.cpp)
+target_link_libraries(obstacle_detection ${catkin_LIBRARIES})
