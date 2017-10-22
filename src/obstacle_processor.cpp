@@ -4,7 +4,7 @@
 
 void centroid_callback(const NASA_ARMS::PointIndicesArray& msg)
 {
-  ROS_INFO("I heard!", msg.points.len());
+  ROS_INFO("I heard!", msg.points.size());
 }
 
 int main(int argc, char **argv)
