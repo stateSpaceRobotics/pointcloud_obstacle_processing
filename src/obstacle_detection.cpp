@@ -23,6 +23,8 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/common/transforms.h>
+#include <NASA_ARMS/PointIndicesArray.h>
+#include <math.h>
 
 // includes for planar_segmentation
 #include <pcl/ModelCoefficients.h>
@@ -50,9 +52,9 @@ ros::Publisher statistical_outlier_publisher;
 ros::Publisher indices_cloud_publisher;
 ros::Publisher planar_cloud_publisher;
 ros::Publisher filtered_cloud_publisher;
-ros::Publisher pub6;
-ros::Publisher pub7;
-ros::Publisher pub8;
+ros::Publisher centroid_publisher;
+ros::Publisher radius_publisher;
+ros::Publisher euc_cluster_publisher;
 
 const char *point_topic = "/kinect2/qhd/points";  // where are we getting the depth data from?
 
@@ -163,12 +165,12 @@ void segment_plane_and_extract_indices(pcl::PointCloud<pcl::PointXYZ>::Ptr& plan
    */
   pcl::SACSegmentation<pcl::PointXYZ> seg;
   seg.setOptimizeCoefficients (true);  // this is good, but I don't know why
-  seg.setModelType (pcl::SACMODEL_PERPENDICULAR_PLANE);  //  TODO: Investigate how to do this properly
-  //seg.setModelType (pcl::SACMODEL_PLANE);
+  //seg.setModelType (pcl::SACMODEL_PERPENDICULAR_PLANE);  //  TODO: Investigate how to do this properly
+  seg.setModelType (pcl::SACMODEL_PLANE);
   seg.setMethodType (pcl::SAC_RANSAC);  // estimator to be used ???
-  seg.setAxis(axis);  // axis to look for planes parallel to  TODO: extract into variable
+  //seg.setAxis(axis);  // axis to look for planes parallel to
 
-  seg.setEpsAngle(eps_angle);  // degree offset from that axis
+  //seg.setEpsAngle(eps_angle);  // degree offset from that axis
   seg.setDistanceThreshold (dist_thresh);  // how close must it be to considered an inlier?
 
   pcl::ExtractIndices<pcl::PointXYZ> extract (true);
@@ -242,9 +244,19 @@ void extract_euclidian_clusters(pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud
   ec.extract (cluster_indices);
 }
 
+float calculate_distance(float x1, float x2, float y1, float y2, float z1, float z2)
+{
+  float x_dist = (float)pow((x2 - x1), 2);
+  float y_dist = (float)pow((y2 - y1), 2);
+  float z_dist = (float)pow((z2 - z1), 2);
+
+  return (float)sqrt(x_dist + y_dist + z_dist);
+}
+
 void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud,
                           std::vector<pcl::PointIndices> &cluster_indices,
-                          pcl::PointCloud<pcl::PointXYZ>::Ptr &output_cloud, int &cluster_count)
+                          pcl::PointCloud<pcl::PointXYZ>::Ptr &output_cloud, int &cluster_count,
+                          NASA_ARMS::PointIndicesArray &centroids)
 {
   /* Works with the extract_euclidian_clusters function to create a point cloud of the outlines of the euclidian cluster
    * points. The convex (or concave) hull part creates a polygon from the points and that's what's added to the point
@@ -256,6 +268,7 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
    * cluster_indices: points in each cluster in the input_cloud
    * output_cloud: cloud containing the convex or concave hulls of each group of points
    *
+   * centroids[]: empty array that will hold the centroid values
    */
 
   cluster_count= 0;
@@ -263,21 +276,49 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
   for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
   {
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cluster (new pcl::PointCloud<pcl::PointXYZ>);
+    float x_sum = 0, y_sum = 0, z_sum = 0;
+    int point_count = 0;
+
     // iterate through each point in the cluster, adding it to the point cloud
     for (std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); ++pit)
     {
       cloud_cluster->points.push_back (input_cloud->points[*pit]);
+      x_sum += input_cloud->points[*pit].x;
+      y_sum += input_cloud->points[*pit].y;
+      z_sum += input_cloud->points[*pit].z;
+      point_count += 1;
     }
+
+    NASA_ARMS::PointWithRad point;
+    point.x = x_sum/point_count;
+    point.y = y_sum/point_count;
+    point.z = z_sum/point_count;
+
+    float max_dist = 0;
+
+    for (std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); ++pit)
+    {
+      float dist = calculate_distance(input_cloud->points[*pit].x, point.x, input_cloud->points[*pit].y, point.y,
+                                      input_cloud->points[*pit].z, point.z);
+      if (dist > max_dist)
+      {
+        max_dist = dist;
+      }
+    }
+
+    point.r = max_dist;
+
+    centroids.points.push_back(point);
+
     cluster_count += 1;
 
-    // TODO: Fine-tune the parameters and determine concave vs convex hull
     // ---------- convex hull -----------------
     // create a 'hull', or outline of points for each cluster.
-    pcl::ConcaveHull<pcl::PointXYZ> hull;
+    pcl::ConvexHull<pcl::PointXYZ> hull;
     pcl::PointCloud<pcl::PointXYZ>::Ptr convexHull (new pcl::PointCloud<pcl::PointXYZ>);
 
     hull.setInputCloud(cloud_cluster);
-    hull.setAlpha(convex_hull_alpha);
+    // hull.setAlpha(convex_hull_alpha);
     hull.reconstruct(*convexHull);
 
     *output_cloud += *convexHull;  // add these border points to the output cloud
@@ -328,20 +369,19 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
 
   // Create the data structures necessary for segmenting the planes and extracting the indices remaining.
-  pcl::PointCloud<pcl::PointXYZ>::Ptr planar_cloud (xyz_cloud_filtered.makeShared());
-  pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
-  const Eigen::Matrix<float, 3, 1> &plane_axis = Eigen::Vector3f(1, 0, 0);
-  pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
-  pcl::PointIndices::Ptr outliers (new pcl::PointIndices);
-  pcl::PointCloud<pcl::PointXYZ>::Ptr indices_cloud (xyz_cloud_filtered.makeShared());
+  pcl::PointCloud<pcl::PointXYZ>::Ptr planar_cloud_x (xyz_cloud_filtered.makeShared());
+  pcl::ModelCoefficients::Ptr coefficients_x (new pcl::ModelCoefficients);
+  const Eigen::Matrix<float, 3, 1> &plane_axis_x = Eigen::Vector3f(0, 1, 0);  // x, y, z  TODO: Determine usefulness
+  pcl::PointIndices::Ptr inliers_x (new pcl::PointIndices);
+  pcl::PointIndices::Ptr outliers_x (new pcl::PointIndices);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr indices_cloud_x (xyz_cloud_filtered.makeShared());
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_f (xyz_cloud_filtered.makeShared());
 
   // remove the points that are detected as planar
-  segment_plane_and_extract_indices(planar_cloud, indices_cloud, cloud_f, coefficients, inliers, outliers, plane_axis,
+  segment_plane_and_extract_indices(planar_cloud_x, indices_cloud_x, cloud_f, coefficients_x, inliers_x, outliers_x, plane_axis_x,
                                     plane_segment_dist_thres, plane_segment_angle,
                                     planar_cloud_publisher, indices_cloud_publisher, filtered_cloud_publisher,
                                     true, true, true);
-
 
   // create data structures for euclidian cluster extraction.
   pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
@@ -355,16 +395,18 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   // create a Point Cloud containing the points of of the clusters (just the outline points)
   pcl::PointCloud<pcl::PointXYZ>::Ptr clustered_cloud (new pcl::PointCloud<pcl::PointXYZ>);
   sensor_msgs::PointCloud2::Ptr clusters (new sensor_msgs::PointCloud2);
-
   int cluster_count;  // how many clusters detected?
-  create_cluster_cloud(cloud_f, cluster_indices, clustered_cloud, cluster_count);
+  NASA_ARMS::PointIndicesArray centroids;
+  create_cluster_cloud(cloud_f, cluster_indices, clustered_cloud, cluster_count, centroids);
 
 
   // -------- Publish results --------------
+  centroid_publisher.publish(centroids);
+  //radius_publisher.publish(distances);
   pcl::toROSMsg(*clustered_cloud, *clusters);  // this probably isn't necessary
   clusters->header.frame_id = "/kinect2_link";
   clusters->header.stamp = ros::Time::now();
-  pub8.publish(clusters);
+  euc_cluster_publisher.publish(clusters);
   std::cout << "clusters found: " << cluster_count << std::endl;
 
 }
@@ -387,10 +429,10 @@ int main (int argc, char** argv)
   statistical_outlier_meanK = 15;  // how many neighbor points to examine? (default: 50)
   statistical_outlier_stdDevThres = 1.0;  // deviation multiplier (default: 1.0)
 
-  plane_segment_dist_thres = 0.08;  // how close to be an inlier? (default: 0.01) IDEAL VAL CHANGES W/ ANGLE also directly determines size of obstacle detected.
+  plane_segment_dist_thres = 0.025;  // how close to be an inlier? (default: 0.01) Hella sensitive!
   plane_segment_angle = 20;
 
-  euc_cluster_tolerance = 0.05;  // 5 cm
+  euc_cluster_tolerance = 0.15;  // 5 cm
   euc_min_cluster_size = 5;  // min # of points in an object cluster
   euc_max_cluster_size = 2000;  // max # of points in an object cluster
   convex_hull_alpha = 180.0;  // max internal angle of the geometric shape formed by points.
@@ -404,9 +446,9 @@ int main (int argc, char** argv)
   indices_cloud_publisher = nh.advertise<pcl::PointCloud<pcl::PointXYZ> >("indices_cloud", 1000);
   planar_cloud_publisher = nh.advertise<pcl::PointCloud<pcl::PointXYZ> >("planar_cloud", 1000);
   filtered_cloud_publisher = nh.advertise<pcl::PointCloud<pcl::PointXYZ> >("cloud_f", 1000);
-  pub6 = nh.advertise<pcl::PointCloud<pcl::PointXYZ> >("passthrough_filter_enable", 1000);
-  pub7 = nh.advertise<pcl::PointCloud<pcl::PointXYZ> >("planar_cloud", 1000);
-  pub8 = nh.advertise<pcl::PointCloud<pcl::PointXYZ> > ("euc_clusters", 5);
+  centroid_publisher = nh.advertise<NASA_ARMS::PointIndicesArray>("centroids", 1);
+  radius_publisher = nh.advertise<NASA_ARMS::PointIndicesArray>("distances", 1);
+  euc_cluster_publisher = nh.advertise<pcl::PointCloud<pcl::PointXYZ> > ("euc_clusters", 5);
 
   // Spin
   ros::spin ();
