@@ -60,8 +60,8 @@ const char *point_topic = "/kinect2/qhd/points";  // where are we getting the de
 
 bool downsample_input_data;
 bool passthrough_filter_enable;
-float passthrough_lower_lim;
-float passthrough_upper_lim;
+float passthrough_upper_limit;
+float passthrough_lower_limit;
 const char *passthrough_filter_axis = "y";
 
 float downsample_leaf_size;
@@ -158,19 +158,19 @@ void segment_plane_and_extract_indices(pcl::PointCloud<pcl::PointXYZ>::Ptr& plan
    * planar_cloud is the input cloud as well as the output cloud that contains all points not considered in a plane
    * indices_cloud is the point cloud of the detected planes only
    * cloud_f is the same as planar_cloud, at the end. It has the points of things not considered to be a plane.
-   * 
+   *
    * Explanation of the various models possible for the segmentation:
    * http://docs.pointclouds.org/1.8.1/group__sample__consensus.html
    *
    */
   pcl::SACSegmentation<pcl::PointXYZ> seg;
   seg.setOptimizeCoefficients (true);  // this is good, but I don't know why
-  //seg.setModelType (pcl::SACMODEL_PERPENDICULAR_PLANE);  //  TODO: Investigate how to do this properly
-  seg.setModelType (pcl::SACMODEL_PLANE);
+  seg.setModelType (pcl::SACMODEL_PERPENDICULAR_PLANE);  //  TODO: Investigate how to do this properly
+  //seg.setModelType (pcl::SACMODEL_PLANE);
   seg.setMethodType (pcl::SAC_RANSAC);  // estimator to be used ???
-  //seg.setAxis(axis);  // axis to look for planes parallel to
+  seg.setAxis(axis);  // axis to look for planes parallel to
 
-  //seg.setEpsAngle(eps_angle);  // degree offset from that axis
+  seg.setEpsAngle(eps_angle);  // degree offset from that axis
   seg.setDistanceThreshold (dist_thresh);  // how close must it be to considered an inlier?
 
   pcl::ExtractIndices<pcl::PointXYZ> extract (true);
@@ -263,12 +263,15 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
    * cloud. This is useful because we don't care about all the points within the obstacle, we just want to know where
    * its borders are.
    *
+   * Also calculates the centroids of each cluster of points and the maximum distance from a centroid to a border point
+   * for use to pass in the obstacle locations to Stage.
+   *
    * Parameters:
    * input_cloud: input point cloud used
    * cluster_indices: points in each cluster in the input_cloud
    * output_cloud: cloud containing the convex or concave hulls of each group of points
-   *
-   * centroids[]: empty array that will hold the centroid values
+   * cluster_count: Integer telling us how many clusters (obstacles) have been found.
+   * centroids: empty vector that will hold the centroid values and the associated distances.
    */
 
   cluster_count= 0;
@@ -356,22 +359,24 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
     pcl::fromPCLPointCloud2(*cloud, *xyz_cloud);  // Convert from PCLPointCloud2 to PointCloud<PointXYZ>
   }
 
-  
+
   if (passthrough_filter_enable)  // chop off points above and below certain values along a specified plane_axis
   {
-    passthrough_filter(xyz_cloud, passthrough_filter_axis, passthrough_lower_lim, passthrough_upper_lim);
+    passthrough_filter(xyz_cloud, passthrough_filter_axis, passthrough_upper_limit, passthrough_lower_limit);
+    passthrough_filter(xyz_cloud, "x", -1.0, 1.0);  // limits left/right input size
+    passthrough_filter(xyz_cloud, "z", 0, 2.75);  // limits forward/backward input size
   }
 
 
   // clean up the data by removing noisy points.
-  remove_statistical_outliers(xyz_cloud, xyz_cloud_filtered, statistical_outlier_meanK, statistical_outlier_stdDevThres, 
+  remove_statistical_outliers(xyz_cloud, xyz_cloud_filtered, statistical_outlier_meanK, statistical_outlier_stdDevThres,
                               statistical_outlier_publisher, true);
 
 
   // Create the data structures necessary for segmenting the planes and extracting the indices remaining.
   pcl::PointCloud<pcl::PointXYZ>::Ptr planar_cloud_x (xyz_cloud_filtered.makeShared());
   pcl::ModelCoefficients::Ptr coefficients_x (new pcl::ModelCoefficients);
-  const Eigen::Matrix<float, 3, 1> &plane_axis_x = Eigen::Vector3f(0, 1, 0);  // x, y, z  TODO: Determine usefulness
+  const Eigen::Matrix<float, 3, 1> &plane_axis_x = Eigen::Vector3f(0, 1, 0);  // x, y, z
   pcl::PointIndices::Ptr inliers_x (new pcl::PointIndices);
   pcl::PointIndices::Ptr outliers_x (new pcl::PointIndices);
   pcl::PointCloud<pcl::PointXYZ>::Ptr indices_cloud_x (xyz_cloud_filtered.makeShared());
@@ -385,11 +390,11 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
   // create data structures for euclidian cluster extraction.
   pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
-  tree->setInputCloud (cloud_f);
+  tree->setInputCloud (planar_cloud_x);
   std::vector<pcl::PointIndices> cluster_indices;  // each entry is a vector of indices_cloud
 
   // extract the clusters of points that meet certain parameters in the point cloud
-  extract_euclidian_clusters(cloud_f, cluster_indices, euc_cluster_tolerance, euc_min_cluster_size, euc_max_cluster_size, tree);
+  extract_euclidian_clusters(planar_cloud_x, cluster_indices, euc_cluster_tolerance, euc_min_cluster_size, euc_max_cluster_size, tree);
 
 
   // create a Point Cloud containing the points of of the clusters (just the outline points)
@@ -397,7 +402,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   sensor_msgs::PointCloud2::Ptr clusters (new sensor_msgs::PointCloud2);
   int cluster_count;  // how many clusters detected?
   NASA_ARMS::PointIndicesArray centroids;
-  create_cluster_cloud(cloud_f, cluster_indices, clustered_cloud, cluster_count, centroids);
+  create_cluster_cloud(planar_cloud_x, cluster_indices, clustered_cloud, cluster_count, centroids);
 
 
   // -------- Publish results --------------
@@ -416,12 +421,12 @@ int main (int argc, char** argv)
   // Initialize ROS
   ros::init (argc, argv, "obstacle_detection");
   ros::NodeHandle nh;
-  
+
   downsample_input_data = true;
   passthrough_filter_enable = true;  // do we wanna cut things out?
 
-  passthrough_lower_lim = -1.0;  // lower limit on the axis filtered by the passthrough filter
-  passthrough_upper_lim = 0.7;  // upper limit on the axis filtered by the passthrough filter
+  passthrough_upper_limit = -0.4;  // upper limit on the axis filtered by the passthrough filter
+  passthrough_lower_limit = 0.65;  // lower limit on the axis filtered by the passthrough filter
 
 
   downsample_leaf_size = 0.015;  // for VoxelGrid (default: 0.1)
@@ -429,7 +434,7 @@ int main (int argc, char** argv)
   statistical_outlier_meanK = 15;  // how many neighbor points to examine? (default: 50)
   statistical_outlier_stdDevThres = 1.0;  // deviation multiplier (default: 1.0)
 
-  plane_segment_dist_thres = 0.025;  // how close to be an inlier? (default: 0.01) Hella sensitive!
+  plane_segment_dist_thres = 0.040;  // how close to be an inlier? (default: 0.01) Hella sensitive!
   plane_segment_angle = 20;
 
   euc_cluster_tolerance = 0.15;  // 5 cm
