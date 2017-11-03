@@ -12,13 +12,15 @@
  * http://pointclouds.org/documentation/tutorials/extract_indices.php#extract-indices
  * http://docs.pointclouds.org/trunk/classpcl_1_1_extract_indices.html#details
  * https://github.com/arunavanag591/tabletop_operation
+ * https://github.com/ahestevenz/pcl-edge-detection/blob/master/src/pcl_ed_visualizer.cpp
+ * http://www.pointclouds.org/blog/gsoc12/cchoi/index.php
 */
 
 #include <ros/ros.h>
 // PCL specific includes
 #include <sensor_msgs/PointCloud2.h>
 #include <pcl_conversions/pcl_conversions.h>
-#include <pcl_ros/point_cloud.h>
+#include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/statistical_outlier_removal.h>
@@ -45,6 +47,12 @@
 #include <pcl/surface/convex_hull.h>
 #include <pcl/surface/concave_hull.h>
 
+// edge detection
+#include <pcl/features/organized_edge_detection.h>
+#include <pcl/features/impl/organized_edge_detection.hpp>
+#include <pcl/features/integral_image_normal.h>
+#include <sensor_msgs/point_cloud_conversion.h>
+
 
 // very bad, no good global variables init
 ros::Publisher downsample_publisher;
@@ -53,7 +61,7 @@ ros::Publisher indices_cloud_publisher;
 ros::Publisher planar_cloud_publisher;
 ros::Publisher filtered_cloud_publisher;
 ros::Publisher centroid_publisher;
-ros::Publisher radius_publisher;
+ros::Publisher edge_cloud_publisher;
 ros::Publisher euc_cluster_publisher;
 
 const char *point_topic = "/kinect2/qhd/points";  // where are we getting the depth data from?
@@ -137,7 +145,9 @@ void remove_statistical_outliers(pcl::PointCloud<pcl::PointXYZ>::Ptr& input_clou
 
   if (publish)
   {
-    pub.publish(output_cloud);
+    sensor_msgs::PointCloud2 publish_cloud;
+    pcl::toROSMsg(output_cloud, publish_cloud);
+    pub.publish(publish_cloud);
   }
 }
 
@@ -202,17 +212,23 @@ void segment_plane_and_extract_indices(pcl::PointCloud<pcl::PointXYZ>::Ptr& plan
 
   if (publish_planar)
   {
-    pub1.publish(planar_cloud);
+    sensor_msgs::PointCloud2 publish_cloud1;
+    pcl::toROSMsg(*planar_cloud, publish_cloud1);
+    pub1.publish(publish_cloud1);
   }
 
   if (publish_indices)
   {
-    pub2.publish(indices_cloud);
+    sensor_msgs::PointCloud2 publish_cloud2;
+    pcl::toROSMsg(*indices_cloud, publish_cloud2);
+    pub2.publish(publish_cloud2);
   }
 
   if (publish_filtered)
   {
-    pub3.publish(cloud_f);
+    sensor_msgs::PointCloud2 publish_cloud3;
+    pcl::toROSMsg(*cloud_f, publish_cloud3);
+    pub3.publish(publish_cloud3);
   }
 
 }
@@ -328,6 +344,56 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
   }
 }
 
+void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, ros::Publisher &pub, bool publish)
+{
+  // TODO: Document!
+  // TODO: parameterize!
+  // TODO: understand what the hell this does
+  /*
+  pcl::PointCloud<pcl::Normal>::Ptr normal (new pcl::PointCloud<pcl::Normal>);
+  pcl::IntegralImageNormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
+  ne.setNormalEstimationMethod (ne.COVARIANCE_MATRIX);
+  ne.setNormalSmoothingSize (10.0f);
+  ne.setBorderPolicy (ne.BORDER_POLICY_MIRROR);
+  ne.setInputCloud (input_cloud);
+  ne.compute (*normal);
+  */
+
+  //pcl::OrganizedEdgeFromNormals<pcl::PointXYZ, pcl::Normal, pcl::Label> oed;
+  pcl::OrganizedEdgeBase<pcl::PointXYZ, pcl::Label> oed;
+
+  //oed.setInputNormals (normal);
+  oed.setInputCloud (input_cloud);
+  oed.setDepthDisconThreshold (0.5);  // TODO: what even?
+  oed.setMaxSearchNeighbors (100);  // TODO:: what even?
+  oed.setEdgeType (oed.EDGELABEL_NAN_BOUNDARY | oed.EDGELABEL_OCCLUDING | oed.EDGELABEL_OCCLUDED | oed.EDGELABEL_HIGH_CURVATURE | oed.EDGELABEL_RGB_CANNY);
+
+  pcl::PointCloud<pcl::Label> labels;
+  std::vector<pcl::PointIndices> label_indices;
+  oed.compute (labels, label_indices);
+
+  std::cout << "indices: " << label_indices.size() << std::endl;
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr occluding_edges (new pcl::PointCloud<pcl::PointXYZ>),
+          occluded_edges (new pcl::PointCloud<pcl::PointXYZ>),
+          nan_boundary_edges (new pcl::PointCloud<pcl::PointXYZ>),
+          high_curvature_edges (new pcl::PointCloud<pcl::PointXYZ>),
+          rgb_edges (new pcl::PointCloud<pcl::PointXYZ>);
+
+  copyPointCloud (*input_cloud, label_indices[0].indices, *nan_boundary_edges);
+  copyPointCloud (*input_cloud, label_indices[1].indices, *occluding_edges);
+  copyPointCloud (*input_cloud, label_indices[2].indices, *occluded_edges);
+  copyPointCloud (*input_cloud, label_indices[3].indices, *high_curvature_edges);
+  copyPointCloud (*input_cloud, label_indices[4].indices, *rgb_edges);
+
+  if (publish)
+  {
+    sensor_msgs::PointCloud2 publish_edge_cloud;
+    pcl::toROSMsg(*high_curvature_edges, publish_edge_cloud);
+    pub.publish(publish_edge_cloud);
+  }
+}
+
 
 void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 {
@@ -372,7 +438,6 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   remove_statistical_outliers(xyz_cloud, xyz_cloud_filtered, statistical_outlier_meanK, statistical_outlier_stdDevThres,
                               statistical_outlier_publisher, true);
 
-
   // Create the data structures necessary for segmenting the planes and extracting the indices remaining.
   pcl::PointCloud<pcl::PointXYZ>::Ptr planar_cloud_x (xyz_cloud_filtered.makeShared());
   pcl::ModelCoefficients::Ptr coefficients_x (new pcl::ModelCoefficients);
@@ -387,6 +452,8 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
                                     plane_segment_dist_thres, plane_segment_angle,
                                     planar_cloud_publisher, indices_cloud_publisher, filtered_cloud_publisher,
                                     true, true, true);
+
+  detect_edges(indices_cloud_x, edge_cloud_publisher, true);
 
   // create data structures for euclidian cluster extraction.
   pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
@@ -407,7 +474,6 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
   // -------- Publish results --------------
   centroid_publisher.publish(centroids);
-  //radius_publisher.publish(distances);
   pcl::toROSMsg(*clustered_cloud, *clusters);  // this probably isn't necessary
   clusters->header.frame_id = "/kinect2_link";
   clusters->header.stamp = ros::Time::now();
@@ -447,13 +513,13 @@ int main (int argc, char** argv)
 
   // Create a ROS publisher for the output point cloud
   downsample_publisher = nh.advertise<sensor_msgs::PointCloud2> ("voxel_grid", 1);
-  statistical_outlier_publisher = nh.advertise<pcl::PointCloud<pcl::PointXYZ> >("statistical_outliers", 1);
-  indices_cloud_publisher = nh.advertise<pcl::PointCloud<pcl::PointXYZ> >("indices_cloud", 1000);
-  planar_cloud_publisher = nh.advertise<pcl::PointCloud<pcl::PointXYZ> >("planar_cloud", 1000);
-  filtered_cloud_publisher = nh.advertise<pcl::PointCloud<pcl::PointXYZ> >("cloud_f", 1000);
+  statistical_outlier_publisher = nh.advertise<sensor_msgs::PointCloud2>("statistical_outliers", 1);
+  indices_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("indices_cloud", 1000);
+  planar_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("planar_cloud", 1000);
+  filtered_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("cloud_f", 1000);
   centroid_publisher = nh.advertise<NASA_ARMS::PointIndicesArray>("centroids", 1);
-  radius_publisher = nh.advertise<NASA_ARMS::PointIndicesArray>("distances", 1);
-  euc_cluster_publisher = nh.advertise<pcl::PointCloud<pcl::PointXYZ> > ("euc_clusters", 5);
+  edge_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("edge_cloud", 1);
+  euc_cluster_publisher = nh.advertise<sensor_msgs::PointCloud2> ("euc_clusters", 5);
 
   // Spin
   ros::spin ();

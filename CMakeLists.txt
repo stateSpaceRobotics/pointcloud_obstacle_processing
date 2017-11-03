@@ -9,9 +9,12 @@ set(CATKIN_DEVEL_PREFIX "/home/tfrankli/catkin_ws/devel")
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
+
+find_package(PCL 1.8 REQUIRED)
 find_package(catkin REQUIRED COMPONENTS
   kinect2_bridge
-  pcl_ros
+##  pcl_ros
+  sensor_msgs
   roscpp
   rospy
   std_msgs
@@ -78,7 +81,7 @@ add_message_files(
 generate_messages(
    DEPENDENCIES
    std_msgs
-   pcl_msgs
+   sensor_msgs
  )
 
 ################################################
@@ -113,14 +116,16 @@ generate_messages(
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES NASA_ARMS
-  CATKIN_DEPENDS kinect2_bridge pcl_ros roscpp rospy std_msgs message_runtime
+  CATKIN_DEPENDS kinect2_bridge roscpp rospy std_msgs message_runtime
   #DEPENDS system_lib
 )
 
 ###########
 ## Build ##
 ###########
-
+include_directories(${PCL_INCLUDE_DIRS})
+link_directories(${PCL_LIBRARY_DIRS})
+add_definitions(${PCL_DEFINITIONS})
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
@@ -209,7 +214,7 @@ include_directories(
 include_directories(include ${catkin_INCLUDE_DIRS})
 
 add_executable(obstacle_detection src/obstacle_detection.cpp)
-target_link_libraries(obstacle_detection ${catkin_LIBRARIES})
+target_link_libraries(obstacle_detection ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
 add_executable(obstacle_processor src/obstacle_processor.cpp)
 target_link_libraries(obstacle_processor ${catkin_LIBRARIES})
