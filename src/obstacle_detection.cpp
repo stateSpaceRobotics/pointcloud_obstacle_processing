@@ -62,6 +62,7 @@ ros::Publisher planar_cloud_publisher;
 ros::Publisher filtered_cloud_publisher;
 ros::Publisher centroid_publisher;
 ros::Publisher edge_cloud_publisher;
+ros::Publisher filtered_edge_cloud_publisher;
 ros::Publisher euc_cluster_publisher;
 
 const char *point_topic = "/kinect2/qhd/points";  // where are we getting the depth data from?
@@ -344,12 +345,12 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
   }
 }
 
-void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, ros::Publisher &pub, bool publish)
+void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr &output_cloud, ros::Publisher &pub, bool publish)
 {
   // TODO: Document!
   // TODO: parameterize!
   // TODO: understand what the hell this does
-  /*
+
   pcl::PointCloud<pcl::Normal>::Ptr normal (new pcl::PointCloud<pcl::Normal>);
   pcl::IntegralImageNormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
   ne.setNormalEstimationMethod (ne.COVARIANCE_MATRIX);
@@ -357,7 +358,7 @@ void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, ros::Publish
   ne.setBorderPolicy (ne.BORDER_POLICY_MIRROR);
   ne.setInputCloud (input_cloud);
   ne.compute (*normal);
-  */
+
 
   //pcl::OrganizedEdgeFromNormals<pcl::PointXYZ, pcl::Normal, pcl::Label> oed;
   pcl::OrganizedEdgeBase<pcl::PointXYZ, pcl::Label> oed;
@@ -386,10 +387,14 @@ void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, ros::Publish
   copyPointCloud (*input_cloud, label_indices[3].indices, *high_curvature_edges);
   copyPointCloud (*input_cloud, label_indices[4].indices, *rgb_edges);
 
+  *output_cloud += *occluding_edges;
+
+  output_cloud->header.frame_id = "/kinect2_link";
+
   if (publish)
   {
     sensor_msgs::PointCloud2 publish_edge_cloud;
-    pcl::toROSMsg(*high_curvature_edges, publish_edge_cloud);
+    pcl::toROSMsg(*occluding_edges, publish_edge_cloud);
     pub.publish(publish_edge_cloud);
   }
 }
@@ -413,6 +418,12 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   pcl::PointCloud<pcl::PointXYZ> xyz_cloud_filtered;
 
 
+  // edge detection for hole detection.
+  pcl::fromPCLPointCloud2(*cloud, *xyz_cloud);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr edge_cloud_output (new pcl::PointCloud<pcl::PointXYZ>);
+  detect_edges(xyz_cloud, edge_cloud_output, edge_cloud_publisher, true);
+
+
   if (downsample_input_data)  // reduce the number of points we have to work with
   {
   	pcl::PCLPointCloud2 cloud_filtered;
@@ -431,6 +442,14 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
     passthrough_filter(xyz_cloud, passthrough_filter_axis, passthrough_upper_limit, passthrough_lower_limit);
     passthrough_filter(xyz_cloud, "x", -1.0, 1.0);  // limits left/right input size
     passthrough_filter(xyz_cloud, "z", 0, 2.75);  // limits forward/backward input size
+
+    passthrough_filter(edge_cloud_output, passthrough_filter_axis, passthrough_upper_limit, passthrough_lower_limit);
+    passthrough_filter(edge_cloud_output, "x", -1.0, 1.0);  // limits left/right input size
+    passthrough_filter(edge_cloud_output, "z", 0, 2.75);  // limits forward/backward input size
+
+    sensor_msgs::PointCloud2 publish_edge_cloud;
+    pcl::toROSMsg(*edge_cloud_output, publish_edge_cloud);
+    filtered_edge_cloud_publisher.publish(publish_edge_cloud);
   }
 
 
@@ -453,7 +472,6 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
                                     planar_cloud_publisher, indices_cloud_publisher, filtered_cloud_publisher,
                                     true, true, true);
 
-  detect_edges(indices_cloud_x, edge_cloud_publisher, true);
 
   // create data structures for euclidian cluster extraction.
   pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
@@ -469,12 +487,13 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   sensor_msgs::PointCloud2::Ptr clusters (new sensor_msgs::PointCloud2);
   int cluster_count;  // how many clusters detected?
   NASA_ARMS::PointIndicesArray centroids;
+
   create_cluster_cloud(planar_cloud_x, cluster_indices, clustered_cloud, cluster_count, centroids);
 
 
   // -------- Publish results --------------
   centroid_publisher.publish(centroids);
-  pcl::toROSMsg(*clustered_cloud, *clusters);  // this probably isn't necessary
+  pcl::toROSMsg(*clustered_cloud, *clusters);
   clusters->header.frame_id = "/kinect2_link";
   clusters->header.stamp = ros::Time::now();
   euc_cluster_publisher.publish(clusters);
@@ -520,6 +539,7 @@ int main (int argc, char** argv)
   centroid_publisher = nh.advertise<NASA_ARMS::PointIndicesArray>("centroids", 1);
   edge_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("edge_cloud", 1);
   euc_cluster_publisher = nh.advertise<sensor_msgs::PointCloud2> ("euc_clusters", 5);
+  filtered_edge_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2> ("edge_cloud_filtered", 1);
 
   // Spin
   ros::spin ();
