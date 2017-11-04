@@ -69,9 +69,12 @@ const char *point_topic = "/kinect2/qhd/points";  // where are we getting the de
 
 bool downsample_input_data;
 bool passthrough_filter_enable;
-float passthrough_upper_limit;
-float passthrough_lower_limit;
-const char *passthrough_filter_axis = "y";
+float pt_upper_lim_y;
+float pt_lower_lim_y;
+float pt_upper_lim_x;
+float pt_lower_lim_x;
+float pt_upper_lim_z;
+float pt_lower_lim_z;
 
 float downsample_leaf_size;
 
@@ -408,95 +411,111 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
    */
 
   // Container for original and filtered data
-  pcl::PCLPointCloud2* cloud = new pcl::PCLPointCloud2;
-  pcl::PCLPointCloud2ConstPtr cloudPtr(cloud);
+  pcl::PCLPointCloud2* initial_cloud = new pcl::PCLPointCloud2;
+  pcl::PCLPointCloud2ConstPtr initial_cloud_ptr(initial_cloud);
 
   // Convert to PCLPointCloud2 data type from ROS sensor_msgs
-  pcl_conversions::toPCL(*cloud_msg, *cloud);
+  pcl_conversions::toPCL(*cloud_msg, *initial_cloud);
 
-  pcl::PointCloud<pcl::PointXYZ>::Ptr xyz_cloud (new pcl::PointCloud<pcl::PointXYZ>);  // new xyz point cloud to use in PCL
-  pcl::PointCloud<pcl::PointXYZ> xyz_cloud_filtered;
+  pcl::PointCloud<pcl::PointXYZ>::Ptr statistical_outlier_input_cloud (new pcl::PointCloud<pcl::PointXYZ>);  // new point cloud to use in PCL
+  pcl::PointCloud<pcl::PointXYZ> statistical_outlier_output_cloud;
 
 
-  // edge detection for hole detection.
-  pcl::fromPCLPointCloud2(*cloud, *xyz_cloud);
+  // ----------- edge detection for hole detection ----------------------
+  pcl::fromPCLPointCloud2(*initial_cloud, *statistical_outlier_input_cloud);
   pcl::PointCloud<pcl::PointXYZ>::Ptr edge_cloud_output (new pcl::PointCloud<pcl::PointXYZ>);
-  detect_edges(xyz_cloud, edge_cloud_output, edge_cloud_publisher, true);
+  detect_edges(statistical_outlier_input_cloud, edge_cloud_output, edge_cloud_publisher, true);
 
 
+  // ---------------------- downsampling --------------------------------
   if (downsample_input_data)  // reduce the number of points we have to work with
   {
   	pcl::PCLPointCloud2 cloud_filtered;
-    downsample_cloud(cloudPtr, cloud_filtered, downsample_leaf_size, downsample_publisher, true);
-    pcl::fromPCLPointCloud2(cloud_filtered, *xyz_cloud);  // Convert from PCLPointCloud2 to PointCloud<PointXYZ>
+    downsample_cloud(initial_cloud_ptr, cloud_filtered, downsample_leaf_size, downsample_publisher, true);
+    pcl::fromPCLPointCloud2(cloud_filtered, *statistical_outlier_input_cloud);  // Convert from PCLPointCloud2 to PointCloud<PointXYZ>
 
   } else {
 
     // set input to raw (unfiltered) data
-    pcl::fromPCLPointCloud2(*cloud, *xyz_cloud);  // Convert from PCLPointCloud2 to PointCloud<PointXYZ>
+    pcl::fromPCLPointCloud2(*initial_cloud, *statistical_outlier_input_cloud);  // Convert from PCLPointCloud2 to PointCloud<PointXYZ>
   }
 
+  // --------------------- passthrough filtering ------------------------
 
   if (passthrough_filter_enable)  // chop off points above and below certain values along a specified plane_axis
   {
-    passthrough_filter(xyz_cloud, passthrough_filter_axis, passthrough_upper_limit, passthrough_lower_limit);
-    passthrough_filter(xyz_cloud, "x", -1.0, 1.0);  // limits left/right input size
-    passthrough_filter(xyz_cloud, "z", 0, 2.75);  // limits forward/backward input size
+    passthrough_filter(statistical_outlier_input_cloud, "y", pt_lower_lim_y, pt_upper_lim_y);  // limits up/down input size
+    passthrough_filter(statistical_outlier_input_cloud, "x", pt_lower_lim_x, pt_upper_lim_x);  // limits left/right input size
+    passthrough_filter(statistical_outlier_input_cloud, "z", pt_lower_lim_z, pt_upper_lim_z);  // limits forward/backward input size
 
-    passthrough_filter(edge_cloud_output, passthrough_filter_axis, passthrough_upper_limit, passthrough_lower_limit);
-    passthrough_filter(edge_cloud_output, "x", -1.0, 1.0);  // limits left/right input size
-    passthrough_filter(edge_cloud_output, "z", 0, 2.75);  // limits forward/backward input size
+    passthrough_filter(edge_cloud_output, "y", pt_lower_lim_y, pt_upper_lim_y);  // limits up/down input size
+    passthrough_filter(edge_cloud_output, "x", pt_lower_lim_x, pt_upper_lim_x);  // limits left/right input size
+    passthrough_filter(edge_cloud_output, "z", pt_lower_lim_z, pt_upper_lim_z);  // limits forward/backward input size
 
-    sensor_msgs::PointCloud2 publish_edge_cloud;
-    pcl::toROSMsg(*edge_cloud_output, publish_edge_cloud);
-    filtered_edge_cloud_publisher.publish(publish_edge_cloud);
+    sensor_msgs::PointCloud2 published_edge_cloud;
+    pcl::toROSMsg(*edge_cloud_output, published_edge_cloud);
+    filtered_edge_cloud_publisher.publish(published_edge_cloud);
   }
 
 
-  // clean up the data by removing noisy points.
-  remove_statistical_outliers(xyz_cloud, xyz_cloud_filtered, statistical_outlier_meanK, statistical_outlier_stdDevThres,
-                              statistical_outlier_publisher, true);
+  // ------------------- statistical outlier removal ---------------------
+  remove_statistical_outliers(statistical_outlier_input_cloud, statistical_outlier_output_cloud,
+                              statistical_outlier_meanK, statistical_outlier_stdDevThres, statistical_outlier_publisher,
+                              true);
+
+  // ----------------- plane segmentation (floor removal) ----------------
 
   // Create the data structures necessary for segmenting the planes and extracting the indices remaining.
-  pcl::PointCloud<pcl::PointXYZ>::Ptr planar_cloud_x (xyz_cloud_filtered.makeShared());
-  pcl::ModelCoefficients::Ptr coefficients_x (new pcl::ModelCoefficients);
-  const Eigen::Matrix<float, 3, 1> &plane_axis_x = Eigen::Vector3f(0, 1, 0);  // x, y, z
-  pcl::PointIndices::Ptr inliers_x (new pcl::PointIndices);
-  pcl::PointIndices::Ptr outliers_x (new pcl::PointIndices);
-  pcl::PointCloud<pcl::PointXYZ>::Ptr indices_cloud_x (xyz_cloud_filtered.makeShared());
-  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_f (xyz_cloud_filtered.makeShared());
+  pcl::PointCloud<pcl::PointXYZ>::Ptr planar_cloud_y (statistical_outlier_output_cloud.makeShared());
+  pcl::ModelCoefficients::Ptr coefficients_y (new pcl::ModelCoefficients);
 
-  // remove the points that are detected as planar
-  segment_plane_and_extract_indices(planar_cloud_x, indices_cloud_x, cloud_f, coefficients_x, inliers_x, outliers_x, plane_axis_x,
-                                    plane_segment_dist_thres, plane_segment_angle,
+  const Eigen::Matrix<float, 3, 1> &plane_axis_y = Eigen::Vector3f(0, 1, 0);  // x, y, z
+
+  pcl::PointIndices::Ptr inliers_y (new pcl::PointIndices);
+  pcl::PointIndices::Ptr outliers_y (new pcl::PointIndices);
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr indices_cloud_y (statistical_outlier_output_cloud.makeShared());
+  pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud_y (statistical_outlier_output_cloud.makeShared());
+
+  // perform the planar segmentation
+  segment_plane_and_extract_indices(planar_cloud_y, indices_cloud_y, filtered_cloud_y, coefficients_y, inliers_y,
+                                    outliers_y, plane_axis_y, plane_segment_dist_thres, plane_segment_angle,
                                     planar_cloud_publisher, indices_cloud_publisher, filtered_cloud_publisher,
                                     true, true, true);
 
 
+  // ------------------ euclidian cluster extraction ------------------
+
   // create data structures for euclidian cluster extraction.
-  pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ>);
-  tree->setInputCloud (planar_cloud_x);
-  std::vector<pcl::PointIndices> cluster_indices;  // each entry is a vector of indices_cloud
+  pcl::search::KdTree<pcl::PointXYZ>::Ptr euc_cluster_tree (new pcl::search::KdTree<pcl::PointXYZ>);
+  euc_cluster_tree->setInputCloud (planar_cloud_y);
+  std::vector<pcl::PointIndices> euc_cluster_indices;  // each entry is a vector of indices_cloud
 
   // extract the clusters of points that meet certain parameters in the point cloud
-  extract_euclidian_clusters(planar_cloud_x, cluster_indices, euc_cluster_tolerance, euc_min_cluster_size, euc_max_cluster_size, tree);
+  extract_euclidian_clusters(planar_cloud_y, euc_cluster_indices, euc_cluster_tolerance, euc_min_cluster_size,
+                             euc_max_cluster_size, euc_cluster_tree);
 
-
+  
+  // ---------------------- cluster cloud creation ------------------------
   // create a Point Cloud containing the points of of the clusters (just the outline points)
   pcl::PointCloud<pcl::PointXYZ>::Ptr clustered_cloud (new pcl::PointCloud<pcl::PointXYZ>);
   sensor_msgs::PointCloud2::Ptr clusters (new sensor_msgs::PointCloud2);
-  int cluster_count;  // how many clusters detected?
   NASA_ARMS::PointIndicesArray centroids;
+  int cluster_count;  // how many clusters detected?
 
-  create_cluster_cloud(planar_cloud_x, cluster_indices, clustered_cloud, cluster_count, centroids);
+  create_cluster_cloud(planar_cloud_y, euc_cluster_indices, clustered_cloud, cluster_count, centroids);
 
 
   // -------- Publish results --------------
   centroid_publisher.publish(centroids);
+
   pcl::toROSMsg(*clustered_cloud, *clusters);
+
   clusters->header.frame_id = "/kinect2_link";
   clusters->header.stamp = ros::Time::now();
+
   euc_cluster_publisher.publish(clusters);
+
   std::cout << "clusters found: " << cluster_count << std::endl;
 
 }
@@ -510,8 +529,12 @@ int main (int argc, char** argv)
   downsample_input_data = true;
   passthrough_filter_enable = true;  // do we wanna cut things out?
 
-  passthrough_upper_limit = -0.4;  // upper limit on the axis filtered by the passthrough filter
-  passthrough_lower_limit = 0.65;  // lower limit on the axis filtered by the passthrough filter
+  pt_lower_lim_y = -0.4;  // upper limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
+  pt_upper_lim_y = 0.65;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
+  pt_lower_lim_x = -1.0;  // lower lim on x axis for passthrough filter
+  pt_upper_lim_x = 1.0;   // upper lim on x axis for passthrough filter
+  pt_lower_lim_z = 0;     // lower lim on z axis for passthrough filter
+  pt_upper_lim_z = 2.75;  // upper lim on z axis for passthrough filter
 
 
   downsample_leaf_size = 0.015;  // for VoxelGrid (default: 0.1)
