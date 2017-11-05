@@ -91,6 +91,8 @@ int euc_min_cluster_size;
 int euc_max_cluster_size;
 float convex_hull_alpha;
 
+float hole_euc_cluster_tolerance;
+
 
 void downsample_cloud(const pcl::PCLPointCloud2ConstPtr& input_cloud, pcl::PCLPointCloud2& output_cloud, float leaf_size,
                       ros::Publisher &pub, bool publish)
@@ -500,7 +502,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   hole_euc_cluster_tree->setInputCloud(edge_cloud_output);
   std::vector<pcl::PointIndices> hole_euc_cluster_indices;
 
-  extract_euclidian_clusters(edge_cloud_output, hole_euc_cluster_indices, euc_cluster_tolerance, euc_min_cluster_size,
+  extract_euclidian_clusters(edge_cloud_output, hole_euc_cluster_indices, hole_euc_cluster_tolerance, euc_min_cluster_size,
                              euc_max_cluster_size, hole_euc_cluster_tree);
 
 
@@ -524,8 +526,8 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
   // combine the centroids from the holes and the regular obstacles
 
-  //centroids.points.reserve(centroids.points.size() + hole_centroids.points.size());
-  //centroids.points.insert(centroids.points.end(), hole_centroids.points.begin(), hole_centroids.points.end());
+  centroids.points.reserve(centroids.points.size() + hole_centroids.points.size());
+  centroids.points.insert(centroids.points.end(), hole_centroids.points.begin(), hole_centroids.points.end());
 
   // -------- Publish results --------------
   centroid_publisher.publish(centroids);
@@ -537,7 +539,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
   euc_cluster_publisher.publish(clusters);
 
-  /*
+
   // hole publish results
   hole_centroid_publisher.publish(hole_centroids);
 
@@ -546,7 +548,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   hole_clusters->header.frame_id = "/kinect2_link";
   hole_clusters->header.stamp = ros::Time::now();
   hole_cluster_publisher.publish(hole_clusters);
-  */
+
   std::cout << " ----------- " << std::endl;
   std::cout << "clusters found: " << cluster_count << " hole clusters found: " << hole_cluster_count << " combined size: " << centroids.points.size() << std::endl;
 
@@ -577,10 +579,12 @@ int main (int argc, char** argv)
   plane_segment_dist_thres = 0.040;  // how close to be an inlier? (default: 0.01) Hella sensitive!
   plane_segment_angle = 20;
 
-  euc_cluster_tolerance = 0.15;  // in meters
+  euc_cluster_tolerance = 0.3;  // in meters
   euc_min_cluster_size = 5;  // min # of points in an object cluster
   euc_max_cluster_size = 2000;  // max # of points in an object cluster
   convex_hull_alpha = 180.0;  // max internal angle of the geometric shape formed by points.
+
+  hole_euc_cluster_tolerance = 0.15;
 
   // Create a ROS subscriber for the input point cloud
   ros::Subscriber sub = nh.subscribe (point_topic, 20, cloud_cb);

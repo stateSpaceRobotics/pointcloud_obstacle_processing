@@ -69,7 +69,7 @@ void centroid_callback(const NASA_ARMS::PointIndicesArray& msg)
 void process_obstacles(const std::vector<NASA_ARMS::PointWithRad> &points) {
   if (centroid_holder.empty()) // if it's empty, default to adding all of them
   {
-    for (auto obstacle : points) {
+    for (auto& obstacle : points) {
 
       if (obstacle.r < 0.5)
       {
@@ -79,14 +79,14 @@ void process_obstacles(const std::vector<NASA_ARMS::PointWithRad> &points) {
 
   } else {  // if it's not empty (read: not the first frame),
 
-    for (auto potential_obstacle : points) {  // compare the new points to the old points
+    for (auto& potential_obstacle : points) {  // compare the new points to the old points
 
       if (potential_obstacle.r < 0.5)  // temporary solution to the edge detection in obstacle_detection marking the borders
       {
         bool found_previously = false;
 
         // TODO: It'd be nice if this could do some type of running average where the point values changed with additional input
-        for (auto previous_obstacle : centroid_holder)  // for each old point, if the new point is within a tolerance to it
+        for (auto& previous_obstacle : centroid_holder)  // for each old point, if the new point is within a tolerance to it
         {
           if ((fabs(previous_obstacle.x - potential_obstacle.x) < x_sim_tolarance)
               && (fabs(previous_obstacle.y - potential_obstacle.y) < y_sim_tolerance)
@@ -111,7 +111,7 @@ void process_obstacles(const std::vector<NASA_ARMS::PointWithRad> &points) {
 
 void create_final_obstacle_list(NASA_ARMS::PointIndicesArray &final_obstacle_list)
 {
-  for(auto old_obstacle : centroid_holder )
+  for(auto& old_obstacle : centroid_holder )
   {
     if (old_obstacle.weight >= min_weight)  // if the obstacle has been seen the minimum amount of times, add it to the final array.
     {
