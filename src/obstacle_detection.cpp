@@ -64,6 +64,8 @@ ros::Publisher centroid_publisher;
 ros::Publisher edge_cloud_publisher;
 ros::Publisher filtered_edge_cloud_publisher;
 ros::Publisher euc_cluster_publisher;
+ros::Publisher hole_centroid_publisher;
+ros::Publisher hole_cluster_publisher;
 
 const char *point_topic = "/kinect2/qhd/points";  // where are we getting the depth data from?
 
@@ -294,7 +296,7 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
    * centroids: empty vector that will hold the centroid values and the associated distances.
    */
 
-  cluster_count= 0;
+  cluster_count = 0;
   // iterate through the list of clusters
   for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
   {
@@ -363,10 +365,10 @@ void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCl
   ne.compute (*normal);
 
 
-  //pcl::OrganizedEdgeFromNormals<pcl::PointXYZ, pcl::Normal, pcl::Label> oed;
-  pcl::OrganizedEdgeBase<pcl::PointXYZ, pcl::Label> oed;
+  pcl::OrganizedEdgeFromNormals<pcl::PointXYZ, pcl::Normal, pcl::Label> oed;
+  //pcl::OrganizedEdgeBase<pcl::PointXYZ, pcl::Label> oed;
 
-  //oed.setInputNormals (normal);
+  oed.setInputNormals (normal);
   oed.setInputCloud (input_cloud);
   oed.setDepthDisconThreshold (0.5);  // TODO: what even?
   oed.setMaxSearchNeighbors (100);  // TODO:: what even?
@@ -375,8 +377,6 @@ void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCl
   pcl::PointCloud<pcl::Label> labels;
   std::vector<pcl::PointIndices> label_indices;
   oed.compute (labels, label_indices);
-
-  std::cout << "indices: " << label_indices.size() << std::endl;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr occluding_edges (new pcl::PointCloud<pcl::PointXYZ>),
           occluded_edges (new pcl::PointCloud<pcl::PointXYZ>),
@@ -495,7 +495,15 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   extract_euclidian_clusters(planar_cloud_y, euc_cluster_indices, euc_cluster_tolerance, euc_min_cluster_size,
                              euc_max_cluster_size, euc_cluster_tree);
 
-  
+  // cluster extraction for the holes
+  pcl::search::KdTree<pcl::PointXYZ>::Ptr hole_euc_cluster_tree (new pcl::search::KdTree<pcl::PointXYZ>);
+  hole_euc_cluster_tree->setInputCloud(edge_cloud_output);
+  std::vector<pcl::PointIndices> hole_euc_cluster_indices;
+
+  extract_euclidian_clusters(edge_cloud_output, hole_euc_cluster_indices, euc_cluster_tolerance, euc_min_cluster_size,
+                             euc_max_cluster_size, hole_euc_cluster_tree);
+
+
   // ---------------------- cluster cloud creation ------------------------
   // create a Point Cloud containing the points of of the clusters (just the outline points)
   pcl::PointCloud<pcl::PointXYZ>::Ptr clustered_cloud (new pcl::PointCloud<pcl::PointXYZ>);
@@ -505,6 +513,19 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
   create_cluster_cloud(planar_cloud_y, euc_cluster_indices, clustered_cloud, cluster_count, centroids);
 
+  // hole cluster cloud creation
+  pcl::PointCloud<pcl::PointXYZ>::Ptr hole_clustered_cloud (new pcl::PointCloud<pcl::PointXYZ>);
+  sensor_msgs::PointCloud2::Ptr hole_clusters (new sensor_msgs::PointCloud2);
+  NASA_ARMS::PointIndicesArray hole_centroids;
+  int hole_cluster_count;
+
+  create_cluster_cloud(edge_cloud_output, hole_euc_cluster_indices, hole_clustered_cloud, hole_cluster_count,
+                       hole_centroids);
+
+  // combine the centroids from the holes and the regular obstacles
+
+  //centroids.points.reserve(centroids.points.size() + hole_centroids.points.size());
+  //centroids.points.insert(centroids.points.end(), hole_centroids.points.begin(), hole_centroids.points.end());
 
   // -------- Publish results --------------
   centroid_publisher.publish(centroids);
@@ -516,7 +537,18 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
   euc_cluster_publisher.publish(clusters);
 
-  std::cout << "clusters found: " << cluster_count << std::endl;
+  /*
+  // hole publish results
+  hole_centroid_publisher.publish(hole_centroids);
+
+  pcl::toROSMsg(*hole_clustered_cloud, *hole_clusters);
+
+  hole_clusters->header.frame_id = "/kinect2_link";
+  hole_clusters->header.stamp = ros::Time::now();
+  hole_cluster_publisher.publish(hole_clusters);
+  */
+  std::cout << " ----------- " << std::endl;
+  std::cout << "clusters found: " << cluster_count << " hole clusters found: " << hole_cluster_count << " combined size: " << centroids.points.size() << std::endl;
 
 }
 
@@ -545,13 +577,13 @@ int main (int argc, char** argv)
   plane_segment_dist_thres = 0.040;  // how close to be an inlier? (default: 0.01) Hella sensitive!
   plane_segment_angle = 20;
 
-  euc_cluster_tolerance = 0.15;  // 5 cm
+  euc_cluster_tolerance = 0.15;  // in meters
   euc_min_cluster_size = 5;  // min # of points in an object cluster
   euc_max_cluster_size = 2000;  // max # of points in an object cluster
   convex_hull_alpha = 180.0;  // max internal angle of the geometric shape formed by points.
 
   // Create a ROS subscriber for the input point cloud
-  ros::Subscriber sub = nh.subscribe (point_topic, 2, cloud_cb);
+  ros::Subscriber sub = nh.subscribe (point_topic, 20, cloud_cb);
 
   // Create a ROS publisher for the output point cloud
   downsample_publisher = nh.advertise<sensor_msgs::PointCloud2> ("voxel_grid", 1);
@@ -563,6 +595,8 @@ int main (int argc, char** argv)
   edge_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("edge_cloud", 1);
   euc_cluster_publisher = nh.advertise<sensor_msgs::PointCloud2> ("euc_clusters", 5);
   filtered_edge_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2> ("edge_cloud_filtered", 1);
+  hole_centroid_publisher = nh.advertise<NASA_ARMS::PointIndicesArray>("hole_centroids", 1);
+  hole_cluster_publisher = nh.advertise<sensor_msgs::PointCloud2>("hole_euc_clusters", 1);
 
   // Spin
   ros::spin ();

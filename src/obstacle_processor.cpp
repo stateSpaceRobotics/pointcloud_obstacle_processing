@@ -2,47 +2,129 @@
 #include "std_msgs/String.h"
 #include <NASA_ARMS/PointIndicesArray.h>
 
-class Point {
-	float x, y, z, radius;
-	int weight;
-public:
-	Point(float, float, float, float);
+#include <cmath>
+
+struct Point
+{
+    float x;
+    float y;
+    float z;
+    float r;
+    int weight;
 };
 
-Point::Point(float x, float y, float z, float radius)
-{
-	weight = 0;
-}
 
+void process_obstacles(const std::vector<NASA_ARMS::PointWithRad> &points);
+void create_final_obstacle_list(NASA_ARMS::PointIndicesArray &final_obstacle_list);
+int frame_counter;
+int frame_history_len;
+bool print_first_point;
+float x_sim_tolarance;
+float y_sim_tolerance;
+float z_sim_tolerance;
+float r_sim_tolerance;
 
-int counter;
+int min_weight;
 
 std::vector <Point> centroid_holder;
-NASA_ARMS::PointIndicesArray obstacle_list;
 
-ros::Publisher pub;
+
+ros::Publisher obstacle_list_publisher;
+
+using namespace std;
 
 
 void centroid_callback(const NASA_ARMS::PointIndicesArray& msg)
 {
-  std::cout << "first x: " << msg.points[0].x  << " first y: " << msg.points[0].y << " first z: " << msg.points[0].z << " first size: " << msg.points[0].r << std::endl;
-	std::cout << "-----" << std::endl;
-  /*
-	counter += 1;
-  if (counter == 10)
+  if (print_first_point)
   {
-    std::cout << "count: " << counter << " size: " << centroid_holder.size() << std::endl;
-    counter = 0;
-		pub.publish(msg);
+    std::cout << "first x: " << msg.points[0].x  << " first y: " << msg.points[0].y << " first z: " << msg.points[0].z
+              << " first size: " << msg.points[0].r << std::endl;
+    std::cout << "-----" << std::endl;
+  }
+
+  frame_counter += 1;
+
+  if (frame_counter == frame_history_len)
+  {
+    std::cout << "count: " << frame_counter << " size: " << centroid_holder.size() << std::endl;
+
+    NASA_ARMS::PointIndicesArray final_obstacle_list;
+
+    create_final_obstacle_list(final_obstacle_list);
+
+    frame_counter = 0;
+    obstacle_list_publisher.publish(final_obstacle_list);
 
   } else {
-  	for (int i=0; i < 2; i++)
-  	{
-  		centroid_holder.push_back(Point(msg.points[i].x, msg.points[i].y, msg.points[i].z, msg.points[i].r));
-  	}
+
+    cout << "frame: " << frame_counter << endl;
+    process_obstacles(msg.points);
+
   }
-	*/
+
+
 }
+
+void process_obstacles(const std::vector<NASA_ARMS::PointWithRad> &points) {
+  if (centroid_holder.empty()) // if it's empty, default to adding all of them
+  {
+    for (auto obstacle : points) {
+
+      if (obstacle.r < 0.5)
+      {
+        centroid_holder.emplace_back(Point{obstacle.x, obstacle.y, obstacle.z, obstacle.r, 1});
+      }
+    }
+
+  } else {  // if it's not empty (read: not the first frame),
+
+    for (auto potential_obstacle : points) {  // compare the new points to the old points
+
+      if (potential_obstacle.r < 0.5)  // temporary solution to the edge detection in obstacle_detection marking the borders
+      {
+        bool found_previously = false;
+
+        // TODO: It'd be nice if this could do some type of running average where the point values changed with additional input
+        for (auto previous_obstacle : centroid_holder)  // for each old point, if the new point is within a tolerance to it
+        {
+          if ((fabs(previous_obstacle.x - potential_obstacle.x) < x_sim_tolarance)
+              && (fabs(previous_obstacle.y - potential_obstacle.y) < y_sim_tolerance)
+              && (fabs(previous_obstacle.z - potential_obstacle.z) < z_sim_tolerance)
+              && (fabs(previous_obstacle.r - potential_obstacle.r) < r_sim_tolerance))
+          {
+            previous_obstacle.weight += 1;  // mark the old point as having been 'seen' again
+            found_previously = true;
+          }
+        }
+
+        if (!found_previously)  // if it wasn't found in the previous list it must be a new point, so add it
+        {
+          centroid_holder.emplace_back(Point{potential_obstacle.x, potential_obstacle.y, potential_obstacle.z,
+                                             potential_obstacle.r, 1});
+        }
+      }
+    }
+  }
+}
+
+
+void create_final_obstacle_list(NASA_ARMS::PointIndicesArray &final_obstacle_list)
+{
+  for(auto old_obstacle : centroid_holder )
+  {
+    if (old_obstacle.weight >= min_weight)  // if the obstacle has been seen the minimum amount of times, add it to the final array.
+    {
+      NASA_ARMS::PointWithRad published_obstacle;
+      published_obstacle.x = old_obstacle.x;
+      published_obstacle.y = old_obstacle.y;
+      published_obstacle.z = old_obstacle.z;
+      published_obstacle.r = old_obstacle.r;
+      final_obstacle_list.points.push_back(published_obstacle);
+    }
+  }
+}
+
 
 int main(int argc, char **argv)
 {
@@ -50,10 +132,21 @@ int main(int argc, char **argv)
 
   ros::NodeHandle n;
 
-  counter = 0;
+  frame_counter = 0;  // count of how many frames have been looked at so far
+  frame_history_len = 10;  // how many frames to look at before publishing obstacle list?
+  print_first_point = false;
+
+  // how similar must a point be to another for them to be considered the same obstacle?
+
+  x_sim_tolarance = 0.2;  // in meters
+  y_sim_tolerance = 0.2;
+  z_sim_tolerance = 0.2;
+  r_sim_tolerance = 0.2;
+
+  min_weight = 5; // must appear in at least four frames to be considered an obstacle
 
   ros::Subscriber sub = n.subscribe("centroids", 1000, centroid_callback);
-	pub = n.advertise<NASA_ARMS::PointIndicesArray>("obstacles", 1);
+  obstacle_list_publisher = n.advertise<NASA_ARMS::PointIndicesArray>("obstacles", 1);
 
   ros::spin();
 
