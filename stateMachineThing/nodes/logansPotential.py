@@ -93,6 +93,8 @@ def obstacle_force(robot):
     obstacleStrength = 1.3
     vector = [0, 0]
     for r2 in Robots:
+        if(r2 == robot):
+            break
         distance = math.sqrt((robot.pose[0] - r2.pose[0]) ** 2 + (robot.pose[1] - r2.pose[1]) ** 2)
         strength = get_pf_magnitude_linear(distance)
         #strength = get_pf_magnitude_constant(distance)
@@ -121,15 +123,27 @@ def obstacle_force(robot):
         #strength = get_pf_magnitude_constant(distance)
         vector[0] += (robot.pose[0] - obstacle[0]) * strength*obstacleStrength
         vector[1] += (robot.pose[1] - obstacle[1]) * strength*obstacleStrength
+
         #code below prevents running into obstacles directly ahead of bots
-        if(vector[0] == 0 and vector[1] != 0):
-            vector[0] = .3
-        elif(vector[1] == 0 and vector[0] != 0):
-            vector[1] = .3
+        xClose = appr(robot.pose[0], obstacle[0], 0.02)
+        yClose = appr(robot.pose[1], obstacle[1], 0.02)
+        '''
+        if (robot == Robots[0]):
+            print("robotX: {0} | obstacleX: {1} | robotY: {2} | obstacleY: {3} ".format(robot.pose[0], obstacle[0], robot.pose[1], obstacle[1]))
+            print("Xdif: {0} |Ydif: {1}| xClose: {2} | yClose: {3}".format(vector[0], vector[1], xClose, yClose))
+        '''
+        #if(xClose and not yClose):
+         #   vector[0] = -1
+        if(yClose and not xClose):
+            vector[1] = -1
     force_from_obstacles = vector
     return force_from_obstacles
 
+def appr(num1, num2, var):
+    return (num1 > (num2 - var) and num1 < (num2 + var))
+
 def drive_from_force(force, robot):
+    global Robots
     # This is multiplied by the angle of the drive force to get the turn command
     turn_multiplier = 1.0
 
@@ -191,6 +205,42 @@ def get_pf_magnitude_constant(distance):
         return strength
     return 0
 
+def forceToMotorConverter(force, robot):
+    force_angle = math.atan2(force[1], force[0])
+    angle_diff = wrap_angle(force_angle - robot.pose[2])
+    #limits to angle dif to prevent negative values
+    if(angle_diff > 1):
+        angle_diff = 1
+    elif(angle_diff < -1):
+        angle_diff = -1
+
+    force_mag = math.hypot(force[0], force[1])
+    midSpeed = 60
+    minSpeed = 40
+    maxSpeed = 85
+    combinedSpeed = midSpeed*force_mag
+    left = combinedSpeed-combinedSpeed*angle_diff
+    right = combinedSpeed+combinedSpeed*angle_diff
+    if(left > maxSpeed):
+        left = maxSpeed
+    elif(left < minSpeed):
+        left = minSpeed
+    if (right > maxSpeed):
+        right = maxSpeed
+    elif (right < minSpeed):
+        right = minSpeed
+    motorCommand = "{0:.0f},{1:.0f}".format(left, right)
+
+    #if (robot == Robots[1]):
+     #   print(motorCommand)
+        #bob = 2+1
+
+    #print(motorCommand)
+    return motorCommand
+
+
+
+
 def potential():
     rospy.init_node('MiniBots', anonymous=True)  # Initialize the ros node
 
@@ -198,6 +248,7 @@ def potential():
 
     count = 0
     for x in rospy.get_published_topics(namespace = '/'):
+        #This is for 2 or more robots
         if "robot" in x[0] and "base" in x[0]:
             rb = Robot()
             rb.count = 1+11*count #initial delay
@@ -206,6 +257,17 @@ def potential():
             count +=1
             topicName = x[0].split("/")
             Pubs.append(rospy.Publisher('/{}/cmd_vel'.format(topicName[1]), Twist, queue_size=10))
+        #This is for just one robot
+        '''
+        if "base" in x[0]:
+            rb = Robot()
+            rb.count = 1+11*count #initial delay
+            Robots.append(rb)
+            rospy.Subscriber(x[0], Odometry, callback, callback_args=(Robots[count],count))
+            count +=1
+            #topicName = x[0].split("/")
+            Pubs.append(rospy.Publisher('/cmd_vel'.format(), Twist, queue_size=10))
+        '''
     rate = rospy.Rate(10)  # 10 Hz
     #Create our publisher to send drive commands to the robot
     while not rospy.is_shutdown():
@@ -213,6 +275,7 @@ def potential():
         #pub.publish(twist)
         count = 0
         for robot in Robots:
+
             # 2. Compute obstacle avoidance force
             o_force = obstacle_force(robot)
 
@@ -224,6 +287,12 @@ def potential():
 
             # 4. Get final drive command from total force
             twist = drive_from_force(total_force, robot)
+            if (robot.wait):
+                total_force = [0,0,0]
+
+            #Below is for actual commands to the motors
+            leftRight = forceToMotorConverter(total_force, robot)
+
 
             # 5. Publish drive command, then sleep
             if(robot.wait):
