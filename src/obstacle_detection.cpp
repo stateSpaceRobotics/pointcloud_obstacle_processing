@@ -92,6 +92,8 @@ int euc_max_cluster_size;
 float convex_hull_alpha;
 
 float hole_euc_cluster_tolerance;
+float edge_depth_tolerance;
+int edge_max_neighbor_search;
 
 
 void downsample_cloud(const pcl::PCLPointCloud2ConstPtr& input_cloud, pcl::PCLPointCloud2& output_cloud, float leaf_size,
@@ -352,7 +354,7 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
   }
 }
 
-void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr &output_cloud, ros::Publisher &pub, bool publish)
+void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr &output_cloud, float depth_dist, int neighbors, ros::Publisher &pub, bool publish)
 {
   // TODO: Document!
   // TODO: parameterize!
@@ -372,8 +374,8 @@ void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCl
 
   oed.setInputNormals (normal);
   oed.setInputCloud (input_cloud);
-  oed.setDepthDisconThreshold (0.5);  // TODO: what even?
-  oed.setMaxSearchNeighbors (100);  // TODO:: what even?
+  oed.setDepthDisconThreshold (depth_dist);  // *apparently* this makes it more sensitive.
+  oed.setMaxSearchNeighbors (neighbors);  // TODO:: what even?
   oed.setEdgeType (oed.EDGELABEL_NAN_BOUNDARY | oed.EDGELABEL_OCCLUDING | oed.EDGELABEL_OCCLUDED | oed.EDGELABEL_HIGH_CURVATURE | oed.EDGELABEL_RGB_CANNY);
 
   pcl::PointCloud<pcl::Label> labels;
@@ -393,13 +395,15 @@ void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCl
   copyPointCloud (*input_cloud, label_indices[4].indices, *rgb_edges);
 
   *output_cloud += *occluding_edges;
+  //*output_cloud += *occluded_edges;
+  //*output_cloud += *high_curvature_edges;
 
   output_cloud->header.frame_id = "/kinect2_link";
 
   if (publish)
   {
     sensor_msgs::PointCloud2 publish_edge_cloud;
-    pcl::toROSMsg(*occluding_edges, publish_edge_cloud);
+    pcl::toROSMsg(*output_cloud, publish_edge_cloud);
     pub.publish(publish_edge_cloud);
   }
 }
@@ -426,7 +430,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   // ----------- edge detection for hole detection ----------------------
   pcl::fromPCLPointCloud2(*initial_cloud, *statistical_outlier_input_cloud);
   pcl::PointCloud<pcl::PointXYZ>::Ptr edge_cloud_output (new pcl::PointCloud<pcl::PointXYZ>);
-  detect_edges(statistical_outlier_input_cloud, edge_cloud_output, edge_cloud_publisher, true);
+  detect_edges(statistical_outlier_input_cloud, edge_cloud_output, edge_depth_tolerance, edge_max_neighbor_search, edge_cloud_publisher, true);
 
 
   // ---------------------- downsampling --------------------------------
@@ -563,12 +567,14 @@ int main (int argc, char** argv)
   downsample_input_data = true;
   passthrough_filter_enable = true;  // do we wanna cut things out?
 
-  pt_lower_lim_y = -0.4;  // upper limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
-  pt_upper_lim_y = 0.65;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
-  pt_lower_lim_x = -1.0;  // lower lim on x axis for passthrough filter
-  pt_upper_lim_x = 1.0;   // upper lim on x axis for passthrough filter
-  pt_lower_lim_z = 0;     // lower lim on z axis for passthrough filter
-  pt_upper_lim_z = 2.75;  // upper lim on z axis for passthrough filter
+  pt_lower_lim_y = -1.5;  // upper limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
+  pt_upper_lim_y = 0.0;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
+
+  pt_lower_lim_x = -0.7;  // lower lim on x axis for passthrough filter
+  pt_upper_lim_x = 0.7;   // upper lim on x axis for passthrough filter
+
+  pt_lower_lim_z = 4;     // lower lim on z axis for passthrough filter
+  pt_upper_lim_z = 7;  // upper lim on z axis for passthrough filter
 
 
   downsample_leaf_size = 0.015;  // for VoxelGrid (default: 0.1)
@@ -584,10 +590,12 @@ int main (int argc, char** argv)
   euc_max_cluster_size = 2000;  // max # of points in an object cluster
   convex_hull_alpha = 180.0;  // max internal angle of the geometric shape formed by points.
 
-  hole_euc_cluster_tolerance = 0.15;
+  hole_euc_cluster_tolerance = 0.2;
+  edge_depth_tolerance = 0.1;
+  edge_max_neighbor_search = 100;
 
   // Create a ROS subscriber for the input point cloud
-  ros::Subscriber sub = nh.subscribe (point_topic, 20, cloud_cb);
+  ros::Subscriber sub = nh.subscribe (point_topic, 1, cloud_cb);
 
   // Create a ROS publisher for the output point cloud
   downsample_publisher = nh.advertise<sensor_msgs::PointCloud2> ("voxel_grid", 1);
