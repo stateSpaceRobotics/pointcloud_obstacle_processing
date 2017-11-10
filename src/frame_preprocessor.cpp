@@ -13,7 +13,7 @@ int current_frame_count;
 
 const char *point_topic = "/kinect2/qhd/points";
 
-pcl::PointCloud<pcl::PointXYZ> final_cloud;
+pcl::PointCloud<pcl::PointXYZ> final_cloud;  // TODO: Should really pre-allocate enough memory initially for performance
 
 void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 {
@@ -62,12 +62,12 @@ int main (int argc, char** argv)
   ros::init (argc, argv, "frame_preprocessor");
   ros::NodeHandle nh;
 
-  frames_to_accumulate = 10;
+  frames_to_accumulate = 16;
   current_frame_count = 0;
 
   //final_cloud = new pcl::PointCloud<pcl::PointXYZ>;
 
-  ros::Subscriber sub = nh.subscribe (point_topic, 1, frame_callback);
+  ros::Subscriber sub = nh.subscribe (point_topic, 30, frame_callback);
 
   concatenated_publisher = nh.advertise<sensor_msgs::PointCloud2> ("accumulated_depth", 1);
 
