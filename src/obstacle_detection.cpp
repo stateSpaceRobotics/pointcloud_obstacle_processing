@@ -67,8 +67,8 @@ ros::Publisher euc_cluster_publisher;
 ros::Publisher hole_centroid_publisher;
 ros::Publisher hole_cluster_publisher;
 
-//const char *point_topic = "/accumulated_depth";  // where are we getting the depth data from?
-const char *point_topic = "/kinect2/qhd/points";
+const char *point_topic = "/accumulated_depth";  // where are we getting the depth data from?
+//const char *point_topic = "/kinect2/qhd/points";
 
 bool downsample_input_data;
 bool passthrough_filter_enable;
@@ -96,6 +96,7 @@ float convex_hull_alpha;
 float hole_euc_cluster_tolerance;
 float edge_depth_tolerance;
 int edge_max_neighbor_search;
+int frames_accumulated;
 
 
 void downsample_cloud(const pcl::PCLPointCloud2ConstPtr& input_cloud, pcl::PCLPointCloud2& output_cloud, float leaf_size,
@@ -370,12 +371,15 @@ void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCl
   ne.setRadiusSearch(0.4);
   */
 
-  /*
-  input_cloud->resize(540*4*960*4);
-  input_cloud->height = 540*4;
-  input_cloud->width = 960*4;
-  input_cloud->is_dense = false;
-  */
+  if (frames_accumulated > 1)
+  {
+    input_cloud->resize(540*960*frames_accumulated);
+    input_cloud->height = 540*sqrt(frames_accumulated);
+    input_cloud->width = 960*sqrt(frames_accumulated);
+    input_cloud->is_dense = false;
+
+  }
+
   pcl::IntegralImageNormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
   ne.setNormalEstimationMethod (ne.COVARIANCE_MATRIX);
   ne.setNormalSmoothingSize (10.0f);
@@ -627,12 +631,13 @@ int main (int argc, char** argv)
 
   euc_cluster_tolerance = 0.3;  // in meters
   euc_min_cluster_size = 5;  // min # of points in an object cluster
-  euc_max_cluster_size = 2000;  // max # of points in an object cluster
+  euc_max_cluster_size = 20000;  // max # of points in an object cluster
   convex_hull_alpha = 180.0;  // max internal angle of the geometric shape formed by points.
 
-  hole_euc_cluster_tolerance = 0.1;
+  hole_euc_cluster_tolerance = 0.11;
   edge_depth_tolerance = 0.1;
   edge_max_neighbor_search = 100;
+  frames_accumulated = 4;
 
   // Create a ROS subscriber for the input point cloud
   ros::Subscriber sub = nh.subscribe (point_topic, 1, cloud_cb);

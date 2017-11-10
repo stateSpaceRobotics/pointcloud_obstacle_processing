@@ -30,7 +30,6 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   ros_cloud->header.frame_id = "/kinect2_link";
   ros_cloud->header.stamp = ros::Time::now();
   */
-
   if (current_frame_count < frames_to_accumulate)
   {
     final_cloud += *accumulator_input_cloud;
@@ -62,7 +61,7 @@ int main (int argc, char** argv)
   ros::init (argc, argv, "frame_preprocessor");
   ros::NodeHandle nh;
 
-  frames_to_accumulate = 16;
+  frames_to_accumulate = 4;
   current_frame_count = 0;
 
   //final_cloud = new pcl::PointCloud<pcl::PointXYZ>;
