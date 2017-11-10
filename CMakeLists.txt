@@ -4,7 +4,7 @@ project(NASA_ARMS)
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++11)
 
-set(CATKIN_DEVEL_PREFIX "/home/tfrankli/catkin_ws/devel")
+set(CATKIN_DEVEL_PREFIX "$ENV{HOME}/catkin_ws/devel")
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -114,7 +114,7 @@ generate_messages(
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-  INCLUDE_DIRS include
+  INCLUDE_DIRS minibot_cr18/include
   LIBRARIES NASA_ARMS
   CATKIN_DEPENDS kinect2_bridge roscpp rospy std_msgs message_runtime
   #DEPENDS system_lib
@@ -213,11 +213,11 @@ include_directories(
 
 include_directories(include ${catkin_INCLUDE_DIRS})
 
-add_executable(obstacle_detection src/obstacle_detection.cpp)
+add_executable(obstacle_detection minibot_cr18/src/obstacle_detection.cpp)
 target_link_libraries(obstacle_detection ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
-add_executable(obstacle_processor src/obstacle_processor.cpp)
+add_executable(obstacle_processor minibot_cr18/src/obstacle_processor.cpp)
 target_link_libraries(obstacle_processor ${catkin_LIBRARIES})
 
-add_executable(frame_preprocessor src/frame_preprocessor.cpp)
+add_executable(frame_preprocessor minibot_cr18/src/frame_preprocessor.cpp)
 target_link_libraries(frame_preprocessor ${catkin_LIBRARIES} ${PCL_LIBRARIES})
