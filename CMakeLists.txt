@@ -135,7 +135,7 @@ include_directories(
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/point_clouds.cpp
+#   src/${PROJECT_NAME}/NASA_ARMS.cpp
 # )
 
 ## Add cmake target dependencies of the library
@@ -146,7 +146,7 @@ include_directories(
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-# add_executable(${PROJECT_NAME}_node src/point_clouds_node.cpp)
+# add_executable(${PROJECT_NAME}_node src/NASA_ARMS_node.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -203,7 +203,7 @@ include_directories(
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_point_clouds.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_NASA_ARMS.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()

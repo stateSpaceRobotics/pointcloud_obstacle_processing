@@ -1,0 +1,6 @@
+<launch>
+	<node name="lighthouse_ros" pkg="NASA_ARMS" type="steam_runtime.sh"/>
+	<!-- <node name="state_machine" pkg="NASA_ARMS" type="state_machine.py"/> -->
+	<node pkg="tf2_ros" type="static_transform_publisher" name="static_tf_broadcaster" args="1 0 0 0 0 0 1 tracking tf_tracking" />
+	<node pkg="NASA_ARMS" name="tf_tracking" type="transform_listener.py"/>
+</launch>
