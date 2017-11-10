@@ -218,3 +218,6 @@ target_link_libraries(obstacle_detection ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
 add_executable(obstacle_processor src/obstacle_processor.cpp)
 target_link_libraries(obstacle_processor ${catkin_LIBRARIES})
+
+add_executable(frame_preprocessor src/frame_preprocessor.cpp)
+target_link_libraries(frame_preprocessor ${catkin_LIBRARIES} ${PCL_LIBRARIES})
