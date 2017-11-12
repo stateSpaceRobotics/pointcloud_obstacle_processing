@@ -21,15 +21,21 @@ class Robot:
         self.count = 0
         self.turn = 0
 
-Goals = [(6, 3), (6,0), (4, -3), (-6, -3), (-6, 0), (-4, 3)]
+# Goals = [(6, 3), (6,0), (4, -3), (-6, -3), (-6, 0), (-4, 3)]
+Goals = [(2, 2), (2, 4), (4, 4), (4, 2), (2, 0), (1, 1)]
 stateCount = len(Goals)
 Pubs = []
 Robots = []
-f = open("../obstacleLoc.txt", "r")
-Obstacles = []
-for x in f.readlines():
-    obstaclePose = x.split()
-    Obstacles.append((int(obstaclePose[0]), int(obstaclePose[1])))
+# f = open("../obstacleLoc.txt", "r")
+# Obstacles = [(0, 0), (1, 3), (-1, 0.5)]
+#for x in f.readlines():
+#    obstaclePose = x.split()
+#    Obstacles.append((int(obstaclePose[0]), int(obstaclePose[1])))
+
+def obstacle_callback(obstacle_list):
+    Obstacles = []
+    for obstacle in obstacle_list:
+        Obstacles.append((obstacle.x + 0.2, obstacle.z))  # offset to transform KinectV2 to base station
 
 
 def callback(data, args):
@@ -38,7 +44,9 @@ def callback(data, args):
         [data.pose.pose.orientation.x, data.pose.pose.orientation.y, data.pose.pose.orientation.z,
          data.pose.pose.orientation.w])
     #args[0] = current_Robot
-    args[0].pose = [data.pose.pose.position.x, data.pose.pose.position.y, yaw]
+   
+    args[0].pose = [-data.pose.pose.position.z, data.pose.pose.position.x, yaw]
+    rospy.logerr("pose is {-1}, {1}".format(args[0].pose[0], args[0].pose[1]))
     #args[1] = index of current_Robot
     Robots[args[1]] = args[0]
 
@@ -62,7 +70,9 @@ def goal_force(robot):
     direction = math.atan2(diff_y, diff_x)
     angle = wrap_angle(direction)
     force_to_goal = [strength * math.cos(angle), strength * math.sin(angle)]
+    rospy.logerr("Current goal: {}".format(robot.state))
     if(mag <.4): #reached goal
+	rospy.logerr("Goal reached: {}".format(robot.state))
         if(robot.state == 0):   #Need to stop to turn
             robot.turn = -1.5
         elif (robot.state == 3):  # Need to stop to turn
@@ -193,20 +203,25 @@ def get_pf_magnitude_constant(distance):
 
 def potential():
     rospy.init_node('MiniBots', anonymous=True)  # Initialize the ros node
-
+    
+    rospy.Subscriber('/obstacles', PointIndicesArray, obstacle_callback)
     global Robots, Pubs
 
     count = 0
-    for x in rospy.get_published_topics(namespace = '/'):
-        if "robot" in x[0] and "base" in x[0]:
-            rb = Robot()
-            rb.count = 1+11*count #initial delay
-            Robots.append(rb)
-            rospy.Subscriber(x[0], Odometry, callback, callback_args=(Robots[count],count))
-            count +=1
-            topicName = x[0].split("/")
-            Pubs.append(rospy.Publisher('/{}/cmd_vel'.format(topicName[1]), Twist, queue_size=10))
+    #for x in rospy.get_published_topics(namespace = '/'):
+    #    if "robot" in x[0] and "base" in x[0]:
+    #        rb = Robot()
+    #        rb.count = 1+11*count #initial delay
+    #        Robots.append(rb)
+    #        rospy.Subscriber(x[0], Odometry, callback, callback_args=(Robots[count],count))
+    #        count +=1
+    #        topicName = x[0].split("/")
+    #        Pubs.append(rospy.Publisher('/{}/cmd_vel'.format(topicName[1]), Twist, queue_size=10))
     rate = rospy.Rate(10)  # 10 Hz
+    rb = Robot()
+    Robots.append(rb)
+    rospy.Subscriber('/device01', Odometry, callback, callback_args=(rb,0))
+    Pubs.append(rospy.Publisher('/cmd_vel'.format(), Twist, queue_size=10))
     #Create our publisher to send drive commands to the robot
     while not rospy.is_shutdown():
 
@@ -243,7 +258,40 @@ def potential():
             rate.sleep()
 
 
+def drive_from_force(force, robot):
+    force_angle = math.atan2(force[1], force[0])
+    angle_diff = wrap_angle(force_angle - robot.pose[2])
+    #limits to angle dif to prevent negative values
+    if(angle_diff > 1):
+        angle_diff = 1
+    elif(angle_diff < -1):
+        angle_diff = -1
 
+    force_mag = math.hypot(force[0], force[1])
+    midSpeed = 60
+    minSpeed = 40
+    maxSpeed = 85
+    combinedSpeed = midSpeed*force_mag
+    left = combinedSpeed-combinedSpeed*angle_diff
+    right = combinedSpeed+combinedSpeed*angle_diff
+    if(left > maxSpeed):
+        left = maxSpeed
+    elif(left < minSpeed):
+        left = minSpeed
+    if (right > maxSpeed):
+        right = maxSpeed
+    elif (right < minSpeed):
+        right = minSpeed
+    motorCommand = "{0:.0f},{1:.0f}".format(left, right)
+
+    #if (robot == Robots[1]):
+     #   print(motorCommand)
+        #bob = 2+1
+
+    #print(motorCommand)
+    return motorCommand
+
+    
 
 
 if __name__ == '__main__':
