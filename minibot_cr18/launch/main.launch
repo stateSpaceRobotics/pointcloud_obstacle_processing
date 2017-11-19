@@ -3,7 +3,6 @@
 		<arg name="publish_tf" value="true" />
 	</include>
 	<node name="lighthouse_ros" pkg="NASA_ARMS" type="steam_runtime.sh"/>
-	<node name="simulation" pkg="stage_ros" type="stageros" args="$(find NASA_ARMS)/minibot_cr18/nodes/test.world" />
         <node name="obstacle_preprocessor" pkg="NASA_ARMS" type="frame_preprocessor" />
         <node name="obstacle_processor" pkg="NASA_ARMS" type="obstacle_detection" />
         <node name="obstacle_postprocessor" pkg="NASA_ARMS" type="obstacle_processor" />
