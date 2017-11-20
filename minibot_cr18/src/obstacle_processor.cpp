@@ -133,7 +133,7 @@ int main(int argc, char **argv)
   ros::NodeHandle n;
 
   frame_counter = 0;  // count of how many frames have been looked at so far
-  frame_history_len = 3;  // how many frames to look at before publishing obstacle list?
+  frame_history_len = 5;  // how many frames to look at before publishing obstacle list?
   print_first_point = false;
 
   // how similar must a point be to another for them to be considered the same obstacle?
