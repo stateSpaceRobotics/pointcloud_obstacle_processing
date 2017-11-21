@@ -3,6 +3,7 @@ import rospy
 from geometry_msgs.msg import *
 from sensor_msgs.msg import *
 from nav_msgs.msg import *
+from NASA_ARMS.msg import *
 from tf.transformations import euler_from_quaternion
 import math
 import time
@@ -39,9 +40,10 @@ Obstacles = []
 
 def obstacle_callback(obstacle_list):
     Obstacles = []
-    for obstacle in obstacle_list:
+    for obstacle in obstacle_list.points:
         Obstacles.append((obstacle.x + 0.2, obstacle.z))  # offset to transform KinectV2 to base station
-
+    
+    rospy.logerr("Obstacles: {}, {}".format(Obstacles[0], Obstacles[1]))
 
 def callback(data, args):
     global Robots
@@ -68,7 +70,7 @@ def callback(data, args):
     #rospy.logerr("botAngle: {0:1f}".format(botAngle))
 
     #args[0].pose = [-1*data.pose.pose.position.z, data.pose.pose.position.x, yaw]
-    #rospy.logerr("pose is: {0:1f}, {1:1f}, {2:1f}".format(args[0].pose[0], args[0].pose[1], args[0].pose[2]))
+    rospy.logerr("pose is: {0:1f}, {1:1f}, {2:1f}".format(args[0].pose[0], args[0].pose[1], args[0].pose[2]))
     #args[1] = index of current_Robot
     Robots[args[1]] = args[0]
 
@@ -235,8 +237,10 @@ def get_pf_magnitude_constant(distance):
 
 def potential():
     rospy.init_node('MiniBots', anonymous=True)  # Initialize the ros node
-    
-    #rospy.Subscriber('/obstacles', PointIndicesArray, obstacle_callback)
+    sub_once = rospy.Subscriber('/obstacles', PointIndicesArray, obstacle_callback)
+    rospy.logerr("------------------------------------------------------waiting---------------------------------")
+    rospy.wait_for_message('/obstacles', PointIndicesArray)
+    sub_once.unregister()
     global Robots, Pubs
 
     count = 0
@@ -256,6 +260,7 @@ def potential():
     rospy.Subscriber('/device01', Odometry, callback, callback_args=(rb,0))
     Pubs.append(rospy.Publisher('/cmd_vel'.format(), Twist, queue_size=10))
     #Create our publisher to send drive commands to the robot
+
     while not rospy.is_shutdown():
 
         #pub.publish(twist)

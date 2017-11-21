@@ -609,16 +609,16 @@ int main (int argc, char** argv)
 
   downsample_input_data = true;
   passthrough_filter_enable = true;  // do we wanna cut things out?
-  edge_detection = true;
+  edge_detection = false;
 
   pt_lower_lim_y = -0.5;  // upper limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
-  pt_upper_lim_y = 0.5;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
+  pt_upper_lim_y = 1.0;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
 
-  pt_lower_lim_x = -0.7;  // lower lim on x axis for passthrough filter
-  pt_upper_lim_x = 0.7;   // upper lim on x axis for passthrough filter
+  pt_lower_lim_x = -1.2;  // lower lim on x axis for passthrough filter
+  pt_upper_lim_x = 1.2;   // upper lim on x axis for passthrough filter
 
   pt_lower_lim_z = 0;     // lower lim on z axis for passthrough filter
-  pt_upper_lim_z = 4;  // upper lim on z axis for passthrough filter
+  pt_upper_lim_z = 7;  // upper lim on z axis for passthrough filter
 
 
   downsample_leaf_size = 0.015;  // for VoxelGrid (default: 0.1)
