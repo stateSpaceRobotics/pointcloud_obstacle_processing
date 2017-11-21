@@ -30,7 +30,7 @@ class Robot:
         self.turn = 0
 
 #Goals = [(3, -1), (5,0), (3, .5), (2, .5), (1, 0), (2, -.5)]
-Goals = [(3, -1), (3,0), (3, 1), (2, 1), (1, 0), (2, -1)]
+Goals = [(4, -.5), (5,0), (4, .3), (2, .3), (1, 0), (1, -.3)]
 stateCount = len(Goals)
 Pubs = []
 Robots = []
@@ -39,11 +39,11 @@ Robots = []
 Obstacles = []
 
 def obstacle_callback(obstacle_list):
-    Obstacles = []
+    global Obstacles
     for obstacle in obstacle_list.points:
-        Obstacles.append((obstacle.x + 0.2, obstacle.z))  # offset to transform KinectV2 to base station
+        Obstacles.append((obstacle.z, obstacle.x))  # offset to transform KinectV2 to base station
     
-    rospy.logerr("Obstacles: {}, {}".format(Obstacles[0], Obstacles[1]))
+    rospy.logerr("Obstacles: {}".format(Obstacles[0]))
 
 def callback(data, args):
     global Robots
@@ -65,7 +65,7 @@ def callback(data, args):
     
     botAngle = (-1)*((90-90*signR)*signP + 60*p*signR)*(math.pi) / 180
 
-    args[0].pose = [-1*data.pose.pose.position.z, data.pose.pose.position.x, botAngle]
+    args[0].pose = [-1*data.pose.pose.position.z, data.pose.pose.position.x + .20, botAngle]
     
     #rospy.logerr("botAngle: {0:1f}".format(botAngle))
 
@@ -131,7 +131,7 @@ def obstacle_force(robot):
     global Goals
     global Obstacles
     global Robots
-    obstacleStrength = 1.3
+    obstacleStrength = .6
     vector = [0, 0]
     for r2 in Robots:
         distance = math.sqrt((robot.pose[0] - r2.pose[0]) ** 2 + (robot.pose[1] - r2.pose[1]) ** 2)

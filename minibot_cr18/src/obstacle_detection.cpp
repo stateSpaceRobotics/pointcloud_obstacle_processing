@@ -614,8 +614,8 @@ int main (int argc, char** argv)
   pt_lower_lim_y = -0.5;  // upper limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
   pt_upper_lim_y = 0.6;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
 
-  pt_lower_lim_x = -1.8;  // lower lim on x axis for passthrough filter
-  pt_upper_lim_x = 1.8;   // upper lim on x axis for passthrough filter
+  pt_lower_lim_x = -0.65;  // lower lim on x axis for passthrough filter
+  pt_upper_lim_x = 0.65;   // upper lim on x axis for passthrough filter
 
   pt_lower_lim_z = 0;     // lower lim on z axis for passthrough filter
   pt_upper_lim_z = 5;  // upper lim on z axis for passthrough filter

@@ -145,7 +145,7 @@ int main(int argc, char **argv)
 
   min_weight = 3; // must appear in at least four frames to be considered an obstacle
 
-  ros::Subscriber sub = n.subscribe("centroids", 1000, centroid_callback);
+  ros::Subscriber sub = n.subscribe("centroids", 10, centroid_callback);
   obstacle_list_publisher = n.advertise<NASA_ARMS::PointIndicesArray>("obstacles", 1);
 
   ros::spin();
