@@ -612,13 +612,13 @@ int main (int argc, char** argv)
   edge_detection = false;
 
   pt_lower_lim_y = -0.5;  // upper limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
-  pt_upper_lim_y = 1.0;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
+  pt_upper_lim_y = 0.6;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
 
-  pt_lower_lim_x = -1.2;  // lower lim on x axis for passthrough filter
-  pt_upper_lim_x = 1.2;   // upper lim on x axis for passthrough filter
+  pt_lower_lim_x = -1.8;  // lower lim on x axis for passthrough filter
+  pt_upper_lim_x = 1.8;   // upper lim on x axis for passthrough filter
 
   pt_lower_lim_z = 0;     // lower lim on z axis for passthrough filter
-  pt_upper_lim_z = 7;  // upper lim on z axis for passthrough filter
+  pt_upper_lim_z = 5;  // upper lim on z axis for passthrough filter
 
 
   downsample_leaf_size = 0.015;  // for VoxelGrid (default: 0.1)
@@ -629,15 +629,15 @@ int main (int argc, char** argv)
   plane_segment_dist_thres = 0.040;  // how close to be an inlier? (default: 0.01) Hella sensitive!
   plane_segment_angle = 20;
 
-  euc_cluster_tolerance = 0.3;  // in meters
+  euc_cluster_tolerance = 0.4;
   euc_min_cluster_size = 5;  // min # of points in an object cluster
   euc_max_cluster_size = 20000;  // max # of points in an object cluster
   convex_hull_alpha = 180.0;  // max internal angle of the geometric shape formed by points.
 
-  hole_euc_cluster_tolerance = 0.11;
+  hole_euc_cluster_tolerance = 0.02;
   edge_depth_tolerance = 0.1;
   edge_max_neighbor_search = 100;
-  frames_accumulated = 4;
+  frames_accumulated = 4; // must have an int square root
 
   // Create a ROS subscriber for the input point cloud
   ros::Subscriber sub = nh.subscribe (point_topic, 1, cloud_cb);
