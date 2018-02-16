@@ -67,7 +67,7 @@ ros::Publisher euc_cluster_publisher;
 ros::Publisher hole_centroid_publisher;
 ros::Publisher hole_cluster_publisher;
 
-const char *point_topic = "/accumulated_depth";  // where are we getting the depth data from?
+const char *point_topic = "/accumulated_depth_1";  // where are we getting the depth data from?
 //const char *point_topic = "/kinect2/qhd/points";
 
 bool downsample_input_data;
@@ -357,7 +357,8 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
   }
 }
 
-void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr &output_cloud, float depth_dist, int neighbors, ros::Publisher &pub, bool publish)
+void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr &output_cloud,
+                  float depth_dist, int neighbors, ros::Publisher &pub, bool publish)
 {
   // TODO: Document!
   // TODO: parameterize!
@@ -607,9 +608,9 @@ int main (int argc, char** argv)
   ros::init (argc, argv, "obstacle_detection");
   ros::NodeHandle nh;
 
-  downsample_input_data = true;
-  passthrough_filter_enable = true;  // do we wanna cut things out?
-  edge_detection = false;
+  downsample_input_data = true;  // make the dataset smaller (and faster to process)
+  passthrough_filter_enable = true;  // do we wanna cut things out? (useful for trimming the points down to the dimensions of the field)
+  edge_detection = true;  // do we wanna see holes? (but slowly)
 
   pt_lower_lim_y = -0.5;  // upper limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
   pt_upper_lim_y = 0.6;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
@@ -637,7 +638,8 @@ int main (int argc, char** argv)
   hole_euc_cluster_tolerance = 0.02;
   edge_depth_tolerance = 0.1;
   edge_max_neighbor_search = 100;
-  frames_accumulated = 4; // must have an int square root
+
+  frames_accumulated = 4; // must have an int square root (really good to know)
 
   // Create a ROS subscriber for the input point cloud
   ros::Subscriber sub = nh.subscribe (point_topic, 1, cloud_cb);
