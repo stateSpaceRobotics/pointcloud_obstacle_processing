@@ -1,3 +1,8 @@
+// TODO: Document
+// TODO: Determine what needs to happen here
+// TODO: make this publish whatever is needed for navigation
+// TODO: make this work with a config file
+
 #include "ros/ros.h"
 #include "std_msgs/String.h"
 #include <NASA_ARMS/PointIndicesArray.h>

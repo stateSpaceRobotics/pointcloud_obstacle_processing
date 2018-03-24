@@ -16,6 +16,12 @@
  * http://www.pointclouds.org/blog/gsoc12/cchoi/index.php
 */
 
+// TODO: make this safe to use with a transform
+// TODO: remove all traces of edge detection
+// TODO: remove things that are being done in the frame_preprocessor
+// TODO: integrate with occupancy grid?
+// TODO: make this work with a config file
+
 #include <ros/ros.h>
 // PCL specific includes
 #include <sensor_msgs/PointCloud2.h>
@@ -357,6 +363,7 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
   }
 }
 
+// TODO: Remove me
 void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr &output_cloud,
                   float depth_dist, int neighbors, ros::Publisher &pub, bool publish)
 {
@@ -449,7 +456,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
 
   // ----------- edge detection for hole detection ----------------------
-
+  // TODO: Remove me
   pcl::PointCloud<pcl::PointXYZ>::Ptr edge_cloud_output (new pcl::PointCloud<pcl::PointXYZ>);
   if (edge_detection) {
     pcl::fromPCLPointCloud2(*initial_cloud, *statistical_outlier_input_cloud);
@@ -473,7 +480,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   }
 
   // --------------------- passthrough filtering ------------------------
-
+  // TODO: Remove this since it's being handled by the frame_preprocessor now
   if (passthrough_filter_enable)  // chop off points above and below certain values along a specified plane_axis
   {
     passthrough_filter(statistical_outlier_input_cloud, "y", pt_lower_lim_y, pt_upper_lim_y);  // limits up/down input size
@@ -494,7 +501,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   }
 
 
-  // ------------------- statistical outlier removal ---------------------
+  // ------------------- statistical outlier removal ---------------------  // TODO: Determine if this is needed
   remove_statistical_outliers(statistical_outlier_input_cloud, statistical_outlier_output_cloud,
                               statistical_outlier_meanK, statistical_outlier_stdDevThres, statistical_outlier_publisher,
                               true);

@@ -24,7 +24,7 @@ float y_min = -1.0;
 float z_min = 1.0;  // 0.0
 float x_max = 0.9;  // 2.0
 float y_max = 1.0;
-float z_max = 5.0;  // 4.0
+float z_max = 3.5;  // 4.0
 
 float block_size = 0.15; // this is the max obstacle size from the competition 0.3
 float dev_percent = 0.5;
@@ -32,8 +32,8 @@ float dev_percent = 0.5;
 const int occupancy_grid_width = (int)ceil((fabs(x_min) + fabs(x_max)) / block_size);
 const int occupancy_grid_height = (int)ceil((fabs(z_max) - fabs(z_min)) / block_size);
 const int occupancy_grid_size = occupancy_grid_width * occupancy_grid_height;
-int *occupancy_grid_pt_counts = new int[occupancy_grid_size];
-int *row_averages = new int[occupancy_grid_height];
+long long *occupancy_grid_pt_counts = new long long[occupancy_grid_size];
+long long *row_averages = new long long[occupancy_grid_height];
 
 struct point {
     float x;
@@ -41,7 +41,7 @@ struct point {
     float z;
 };
 
-const char *point_topic = "/kinect2/sd/points";
+const char *point_topic = "/kinect2/qhd/points";
 
 pcl::PointCloud<pcl::PointXYZ> final_cloud;  // TODO: Should really pre-allocate enough memory initially for performance
 
@@ -119,6 +119,10 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   {
     occupancy_grid_pt_counts[i] = 0;
   }
+  for (int i = 0 ; i < occupancy_grid_height; i++)
+  {
+    row_averages[i] = 0;
+  }
   passthrough_filter(accumulator_input_cloud, "x", x_min, x_max);
   passthrough_filter(accumulator_input_cloud, "y", y_min, y_max);
   passthrough_filter(accumulator_input_cloud, "z", z_min, z_max);
@@ -151,14 +155,14 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
     std::cout << "Occupancy_Grid size: " << occupancy_grid_size << std::endl;
     std::cout << "Block size: " << block_size << " height: " << occupancy_grid_height << " width: " << occupancy_grid_width << std::endl;
 
-    int row_point_count = 0;
+    long long row_point_count = 0;
 
     for (int row_ind = 0; row_ind < occupancy_grid_height; row_ind++)  // compute averages for each row in point cloud.
     {
       row_point_count = 0;
       for (int col_ind = 0; col_ind < occupancy_grid_width; col_ind++)
       {
-        row_point_count += occupancy_grid_pt_counts[row_ind*occupancy_grid_height + col_ind];
+        row_point_count += occupancy_grid_pt_counts[row_ind*occupancy_grid_width + col_ind];
       }
       row_averages[row_ind] = row_point_count / occupancy_grid_width;
     }
@@ -178,8 +182,17 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
     for (int i = 0; i < occupancy_grid_size; i++)
     {
+      int current_row_avg = row_averages[(int)(i / occupancy_grid_width)];
+      if (occupancy_grid_pt_counts[i] < current_row_avg * (1-dev_percent))
+      {
+        occupancy_grid_data[i] = 100;
 
-      occupancy_grid_data[i] = (occupancy_grid_pt_counts[i] < row_averages[(int)(i / occupancy_grid_width)] * (1-dev_percent)) ? 100 : 0;
+      } else {
+
+        occupancy_grid_data[i] = 0;
+      }
+
+      //occupancy_grid_data[i] = (occupancy_grid_pt_counts[i] < row_averages[(int)(i / occupancy_grid_width)] * (1-dev_percent)) ? 100 : 0;
     }
 
     nav_msgs::OccupancyGrid *occupancyGrid = new nav_msgs::OccupancyGrid();
@@ -227,7 +240,7 @@ int main (int argc, char** argv)
   ros::init (argc, argv, "frame_preprocessor");
   ros::NodeHandle nh;
 
-  frames_to_accumulate = 4; // can't be zero :-)
+  frames_to_accumulate = 1; // can't be zero :-)
   current_frame_count = 0;
   count = 0;
 
