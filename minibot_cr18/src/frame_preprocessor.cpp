@@ -19,21 +19,21 @@ int frames_to_accumulate;
 int current_frame_count;
 int count;
 
-float x_min = -1.0;  // -2.0
-float y_min = -1.0;
-float z_min = 1.0;  // 0.0
-float x_max = 0.9;  // 2.0
-float y_max = 1.0;
-float z_max = 3.5;  // 4.0
+float x_min;  // -2.0
+float y_min;
+float z_min;  // 0.0
+float x_max;  // 2.0
+float y_max;
+float z_max;  // 4.0
 
-float block_size = 0.15; // this is the max obstacle size from the competition 0.3
-float dev_percent = 0.5;
+float block_size; // this is the max obstacle size from the competition 0.3
+float dev_percent;
 
-const int occupancy_grid_width = (int)ceil((fabs(x_min) + fabs(x_max)) / block_size);
-const int occupancy_grid_height = (int)ceil((fabs(z_max) - fabs(z_min)) / block_size);
-const int occupancy_grid_size = occupancy_grid_width * occupancy_grid_height;
-long long *occupancy_grid_pt_counts = new long long[occupancy_grid_size];
-long long *row_averages = new long long[occupancy_grid_height];
+int occupancy_grid_width;
+int occupancy_grid_height;
+int occupancy_grid_size;
+long long *occupancy_grid_pt_counts;
+long long *row_averages;
 
 struct point {
     float x;
@@ -41,7 +41,7 @@ struct point {
     float z;
 };
 
-const char *point_topic = "/kinect2/qhd/points";
+const char *point_topic = "/kinect2/sd/points";
 
 pcl::PointCloud<pcl::PointXYZ> final_cloud;  // TODO: Should really pre-allocate enough memory initially for performance
 
@@ -130,6 +130,20 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   if (current_frame_count < frames_to_accumulate)  // don't have enough frames yet
   {
 
+
+    final_cloud += *accumulator_input_cloud;
+    current_frame_count += 1;
+    /*
+    //std::cout << "frame " << current_frame_count << " processed." << std::endl;
+    //std::cout << "point count: " << point_count << std::endl;
+    // for debugging purposes:
+    //std::cout << "width: " << accumulator_input_cloud->width << std::endl;
+    //std::cout << "height: " << accumulator_input_cloud->height << std::endl;
+    */
+  } else {  // sufficient number of frames, go ahead and publish to the main obstacle program.
+
+    sensor_msgs::PointCloud2 ros_cloud;
+
     int nan_count = 0;
     /*
     float inc_value = 0.001;
@@ -141,12 +155,12 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
     int point_count = 0;
     int occupied = 0;
 
-    for(int i = 0; i < static_cast<int> (accumulator_input_cloud->points.size()); ++i)  // iterate through all points and place them in an occupancy grid
+    for(int i = 0; i < static_cast<int> (final_cloud.points.size()); ++i)  // iterate through all points and place them in an occupancy grid
     {
-      if (pcl_isnan(accumulator_input_cloud->points[i].x)){
+      if (pcl_isnan(final_cloud.points[i].x)){
         continue;  // don't count NaN points.
       }
-      occupancy_grid_pt_counts[get_occupancy_grid_location(accumulator_input_cloud->points[i].x, accumulator_input_cloud->points[i].z)]++;  // determine location in grid for point
+      occupancy_grid_pt_counts[get_occupancy_grid_location(final_cloud.points[i].x, final_cloud.points[i].z)]++;  // determine location in grid for point
       point_count++;
     }
 
@@ -182,7 +196,19 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
     for (int i = 0; i < occupancy_grid_size; i++)
     {
-      int current_row_avg = row_averages[(int)(i / occupancy_grid_width)];
+
+      long long current_row_avg = row_averages[(int)(i / occupancy_grid_width)];
+      /*
+      int percent = 0;
+
+      if(current_row_avg > 0)
+      {
+        percent = (1 - (occupancy_grid_pt_counts[i] / current_row_avg) * 100);
+      }
+
+      if(percent < 0) percent = 0;
+      occupancy_grid_data[i] = percent;
+      */
       if (occupancy_grid_pt_counts[i] < current_row_avg * (1-dev_percent))
       {
         occupancy_grid_data[i] = 100;
@@ -205,18 +231,6 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
 
     std::cout << "Percent occupied: " << ((float)occupied / occupancy_grid_size) * 100 << std::endl;  // how many cells are occupied? (debug only)
-    final_cloud += *accumulator_input_cloud;
-    current_frame_count += 1;
-    /*
-    //std::cout << "frame " << current_frame_count << " processed." << std::endl;
-    //std::cout << "point count: " << point_count << std::endl;
-    // for debugging purposes:
-    //std::cout << "width: " << accumulator_input_cloud->width << std::endl;
-    //std::cout << "height: " << accumulator_input_cloud->height << std::endl;
-    */
-  } else {  // sufficient number of frames, go ahead and publish to the main obstacle program.
-
-    sensor_msgs::PointCloud2 ros_cloud;
 
     pcl::toROSMsg(final_cloud, ros_cloud);
 
@@ -238,9 +252,28 @@ int main (int argc, char** argv)
 {
   // Initialize ros
   ros::init (argc, argv, "frame_preprocessor");
-  ros::NodeHandle nh;
+  ros::NodeHandle nh("~");
 
-  frames_to_accumulate = 1; // can't be zero :-)
+  nh.param("accumulate_count", frames_to_accumulate, 1);
+
+  nh.param("x_min", x_min, (float) -1.89);
+  nh.param("x_max", x_max, (float) 1.89);
+  nh.param("y_min", y_min, (float) -1.0);
+  nh.param("y_max", y_max, (float) 1.0);
+  nh.param("z_min", z_min, (float) 1.5);
+  nh.param("z_max", z_max, (float) 5.0);
+
+  nh.param("block_size", block_size, (float) 0.15);
+  nh.param("dev_percent", dev_percent, (float) 0.5);
+
+  occupancy_grid_width = (int)ceil((fabs(x_min) + fabs(x_max)) / block_size);
+  occupancy_grid_height = (int)ceil((fabs(z_max) - fabs(z_min)) / block_size);
+  occupancy_grid_size = occupancy_grid_width * occupancy_grid_height;
+  occupancy_grid_pt_counts = new long long[occupancy_grid_size];
+  row_averages = new long long[occupancy_grid_height];
+
+
+  //frames_to_accumulate = 4; // can't be zero :-)
   current_frame_count = 0;
   count = 0;
 
