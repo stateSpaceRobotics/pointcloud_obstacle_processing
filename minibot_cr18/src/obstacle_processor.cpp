@@ -156,7 +156,7 @@ int main(int argc, char **argv)
   ros::NodeHandle n;
 
   frame_counter = 0;  // count of how many frames have been looked at so far
-  frame_history_len = 5;  // how many frames to look at before publishing obstacle list?
+  frame_history_len = 1;  // how many frames to look at before publishing obstacle list?
   print_first_point = false;
 
   // how similar must a point be to another for them to be considered the same obstacle?
@@ -167,7 +167,7 @@ int main(int argc, char **argv)
 
   max_obstacle_rad = 0.5; // in meters
 
-  min_weight = 2; // must appear in at least two frames to be considered an obstacle (TODO: Change to a percentage)
+  min_weight = 1; // must appear in at least two frames to be considered an obstacle (TODO: Change to a percentage)
 
   ros::Subscriber sub = n.subscribe("centroids", 10, centroid_callback);
   obstacle_list_publisher = n.advertise<NASA_ARMS::PointIndicesArray>("obstacles", 1);

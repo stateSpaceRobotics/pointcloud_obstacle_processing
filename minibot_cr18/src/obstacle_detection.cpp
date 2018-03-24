@@ -68,7 +68,7 @@ ros::Publisher hole_centroid_publisher;
 ros::Publisher hole_cluster_publisher;
 
 const char *point_topic = "/accumulated_depth_1";  // where are we getting the depth data from?
-//const char *point_topic = "/kinect2/qhd/points";
+//const char *point_topic = "/kinect2/sd/points";
 
 bool downsample_input_data;
 bool passthrough_filter_enable;
@@ -199,7 +199,7 @@ void segment_plane_and_extract_indices(pcl::PointCloud<pcl::PointXYZ>::Ptr& plan
   pcl::ExtractIndices<pcl::PointXYZ> extract (true);
 
   int i = 0, nr_points = (int) planar_cloud->points.size();
-  // While 30% of the original cloud is still there
+  // While 30% of the original cloud is still there ... ?
 
   while (planar_cloud->points.size () > 0.3 * nr_points)
   {
@@ -610,13 +610,13 @@ int main (int argc, char** argv)
 
   downsample_input_data = true;  // make the dataset smaller (and faster to process)
   passthrough_filter_enable = true;  // do we wanna cut things out? (useful for trimming the points down to the dimensions of the field)
-  edge_detection = true;  // do we wanna see holes? (but slowly)
+  edge_detection = false;  // do we wanna see holes? (but slowly)
 
   pt_lower_lim_y = -0.5;  // upper limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
   pt_upper_lim_y = 0.6;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
 
-  pt_lower_lim_x = -1.8;  // lower lim on x axis for passthrough filter
-  pt_upper_lim_x = 1.8;   // upper lim on x axis for passthrough filter
+  pt_lower_lim_x = -1.0;  // lower lim on x axis for passthrough filter
+  pt_upper_lim_x = 1.0;   // upper lim on x axis for passthrough filter
 
   pt_lower_lim_z = 0;     // lower lim on z axis for passthrough filter
   pt_upper_lim_z = 5;  // upper lim on z axis for passthrough filter

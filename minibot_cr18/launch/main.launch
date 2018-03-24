@@ -1,13 +1,18 @@
 <launch>
         <include file="$(find kinect2_bridge)/launch/kinect2_bridge.launch">
 		<arg name="publish_tf" value="true" />
+    <arg name="fps_limit" value="15" />
+    <arg name="depth_method" value="opengl" />
+    <arg name="reg_device" value="1" />
+    <arg name="depth_device" value="1" />
+    <arg name="worker_threads" value="2" />
 	</include>
-	<node name="lighthouse_ros" pkg="NASA_ARMS" type="steam_runtime.sh"/>
-	<node name="simulation" pkg="stage_ros" type="stageros" args="$(find NASA_ARMS)/minibot_cr18/nodes/test.world" />
+	<!-- <node name="lighthouse_ros" pkg="NASA_ARMS" type="steam_runtime.sh"/> -->
+	<!-- <node name="simulation" pkg="stage_ros" type="stageros" args="$(find NASA_ARMS)/minibot_cr18/nodes/test.world" /> -->
         <node name="obstacle_preprocessor" pkg="NASA_ARMS" type="frame_preprocessor" />
         <node name="obstacle_processor" pkg="NASA_ARMS" type="obstacle_detection" />
         <node name="obstacle_postprocessor" pkg="NASA_ARMS" type="obstacle_processor" />
-	<node name="state_machine" pkg="NASA_ARMS" type="state_machine.py"/>
+	<!-- <node name="state_machine" pkg="NASA_ARMS" type="state_machine.py"/> -->
 	<!-- <node pkg="tf2_ros" type="static_transform_publisher" name="static_tf_broadcaster" args="1 0 0 0 0 0 1 tracking tf_tracking" /> -->
 	<!-- <node pkg="NASA_ARMS" name="tf_tracking" type="transform_listener.py"/> -->
 </launch>
