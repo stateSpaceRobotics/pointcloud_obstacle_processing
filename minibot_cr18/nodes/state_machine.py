@@ -3,12 +3,20 @@ import rospy
 from geometry_msgs.msg import *
 from sensor_msgs.msg import *
 from nav_msgs.msg import *
+from NASA_ARMS.msg import *
 from tf.transformations import euler_from_quaternion
 import math
 import time
 import types
 import sys
 import random
+import socket
+from builtins import bytes
+
+TCP_IP = '192.168.4.1'
+TCP_PORT = 9999
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.connect((TCP_IP, TCP_PORT))
 
 class Robot:
     def __init__(self):
@@ -21,22 +29,21 @@ class Robot:
         self.count = 0
         self.turn = 0
 
-# Goals = [(6, 3), (6,0), (4, -3), (-6, -3), (-6, 0), (-4, 3)]
-Goals = [(2, 2), (2, 4), (4, 4), (4, 2), (2, 0), (1, 1)]
+#Goals = [(3, -1), (5,0), (3, .5), (2, .5), (1, 0), (2, -.5)]
+Goals = [(4, -.5), (5,0), (4, .3), (2, .3), (1, 0), (1, -.3)]
 stateCount = len(Goals)
 Pubs = []
 Robots = []
-# f = open("../obstacleLoc.txt", "r")
-# Obstacles = [(0, 0), (1, 3), (-1, 0.5)]
-#for x in f.readlines():
-#    obstaclePose = x.split()
-#    Obstacles.append((int(obstaclePose[0]), int(obstaclePose[1])))
+
+#Obstacles = [(0, 0), (1, 3), (-1, 0.5)]
+Obstacles = []
 
 def obstacle_callback(obstacle_list):
-    Obstacles = []
-    for obstacle in obstacle_list:
-        Obstacles.append((obstacle.x + 0.2, obstacle.z))  # offset to transform KinectV2 to base station
-
+    global Obstacles
+    for obstacle in obstacle_list.points:
+        Obstacles.append((obstacle.z, obstacle.x))  # offset to transform KinectV2 to base station
+    
+    rospy.logerr("Obstacles: {}".format(Obstacles[0]))
 
 def callback(data, args):
     global Robots
@@ -44,9 +51,26 @@ def callback(data, args):
         [data.pose.pose.orientation.x, data.pose.pose.orientation.y, data.pose.pose.orientation.z,
          data.pose.pose.orientation.w])
     #args[0] = current_Robot
-   
-    args[0].pose = [-data.pose.pose.position.z, data.pose.pose.position.x, yaw]
-    rospy.logerr("pose is {-1}, {1}".format(args[0].pose[0], args[0].pose[1]))
+    #rospy.logerr("roll: {0:2f} | p: {1:2f} | yaw: {2:2f}".format(r, p, yaw))
+
+    if(r<0):
+        signR = -1
+    else:
+        signR = 1
+
+    if(p<0):
+        signP = -1
+    else:
+        signP = 1
+    
+    botAngle = (-1)*((90-90*signR)*signP + 60*p*signR)*(math.pi) / 180
+
+    args[0].pose = [-1*data.pose.pose.position.z, data.pose.pose.position.x + .20, botAngle]
+    
+    #rospy.logerr("botAngle: {0:1f}".format(botAngle))
+
+    #args[0].pose = [-1*data.pose.pose.position.z, data.pose.pose.position.x, yaw]
+    rospy.logerr("pose is: {0:1f}, {1:1f}, {2:1f}".format(args[0].pose[0], args[0].pose[1], args[0].pose[2]))
     #args[1] = index of current_Robot
     Robots[args[1]] = args[0]
 
@@ -69,18 +93,25 @@ def goal_force(robot):
     mag = math.sqrt(diff_x**2+diff_y**2)
     direction = math.atan2(diff_y, diff_x)
     angle = wrap_angle(direction)
+    #rospy.logerr("in goal_force, direction: {}, angle: {}".format(direction, angle))
     force_to_goal = [strength * math.cos(angle), strength * math.sin(angle)]
-    rospy.logerr("Current goal: {}".format(robot.state))
-    if(mag <.4): #reached goal
+    rospy.logerr("Current goal: {}, goal_x: {}, goal_y: {}".format(robot.state, goal[0], goal[1]))
+    if(mag <.5): #reached goal
 	rospy.logerr("Goal reached: {}".format(robot.state))
         if(robot.state == 0):   #Need to stop to turn
-            robot.turn = -1.5
+	    robot.count = 10
+            robot.state = (robot.state +1)% stateCount
+	    
+	    #robot.turn = -1.5
         elif (robot.state == 3):  # Need to stop to turn
-            robot.turn = 1.5
-        if(robot.state == 1 or robot.state == 4):   #At load & unload
+            robot.count = 10
+	    #robot.turn = 1.5
+	    robot.state = (robot.state +1)% stateCount
+        elif(robot.state == 1 or robot.state == 4):   #At load & unload
             robot.count = 10
             robot.wait = True
-        if(robot.state == 2 or robot.state == 5):
+        elif(robot.state == 2 or robot.state == 5):
+	    robot.count = 10
             robot.state = (robot.state +1)% stateCount
 
     # if (mag < .3 and not (robot.atLoad == True or robot.atUnload == True)):
@@ -100,7 +131,7 @@ def obstacle_force(robot):
     global Goals
     global Obstacles
     global Robots
-    obstacleStrength = 1.3
+    obstacleStrength = .6
     vector = [0, 0]
     for r2 in Robots:
         distance = math.sqrt((robot.pose[0] - r2.pose[0]) ** 2 + (robot.pose[1] - r2.pose[1]) ** 2)
@@ -157,6 +188,7 @@ def drive_from_force(force, robot):
     force_mag = math.hypot(force[0], force[1])
 
     angle_diff = wrap_angle(force_angle - robot.pose[2])
+    #rospy.logerr("drive_from_force force_angle: {}, angle_diff: {}".format(force_angle, angle_diff))
 
     # Get turn speed
     twist.angular.z = turn_multiplier * angle_diff
@@ -201,10 +233,14 @@ def get_pf_magnitude_constant(distance):
         return strength
     return 0
 
+
+
 def potential():
     rospy.init_node('MiniBots', anonymous=True)  # Initialize the ros node
-    
-    rospy.Subscriber('/obstacles', PointIndicesArray, obstacle_callback)
+    sub_once = rospy.Subscriber('/obstacles', PointIndicesArray, obstacle_callback)
+    rospy.logerr("------------------------------------------------------waiting---------------------------------")
+    rospy.wait_for_message('/obstacles', PointIndicesArray)
+    sub_once.unregister()
     global Robots, Pubs
 
     count = 0
@@ -217,12 +253,14 @@ def potential():
     #        count +=1
     #        topicName = x[0].split("/")
     #        Pubs.append(rospy.Publisher('/{}/cmd_vel'.format(topicName[1]), Twist, queue_size=10))
-    rate = rospy.Rate(10)  # 10 Hz
+    rate = rospy.Rate(5)  # 10 Hz
     rb = Robot()
     Robots.append(rb)
+    rb.count = 1
     rospy.Subscriber('/device01', Odometry, callback, callback_args=(rb,0))
     Pubs.append(rospy.Publisher('/cmd_vel'.format(), Twist, queue_size=10))
     #Create our publisher to send drive commands to the robot
+
     while not rospy.is_shutdown():
 
         #pub.publish(twist)
@@ -243,37 +281,46 @@ def potential():
             # 5. Publish drive command, then sleep
             if(robot.wait):
                 twist = Twist()
-            if(robot.turn != 0):
+            motorForce(total_force, robot)
+            '''
+	    if(robot.turn != 0):
                 if(abs(robot.pose[2]) > (abs(robot.turn)-0.2) and abs(robot.pose[2]) < (abs(robot.turn)+0.2)):
                     robot.turn = 0
                     robot.state = (robot.state + 1) % stateCount
                     break
                 twist = Twist()
                 twist.angular.z = -.5
-
+	   
 
             Pubs[count].publish(twist)
             count +=1
-
+            '''
             rate.sleep()
 
 
-def drive_from_force(force, robot):
+def motorForce(force, robot):
     force_angle = math.atan2(force[1], force[0])
     angle_diff = wrap_angle(force_angle - robot.pose[2])
     #limits to angle dif to prevent negative values
-    if(angle_diff > 1):
-        angle_diff = 1
-    elif(angle_diff < -1):
-        angle_diff = -1
-
+    
+    if(angle_diff > 3):
+        angle_diff = 3
+    elif(angle_diff < -3):
+        angle_diff = -3
+    
     force_mag = math.hypot(force[0], force[1])
-    midSpeed = 60
-    minSpeed = 40
-    maxSpeed = 85
+    midSpeed = 100
+    minSpeed = 20
+    maxSpeed = 100
+    scalar = .5
+    baseSpeed = 95
     combinedSpeed = midSpeed*force_mag
-    left = combinedSpeed-combinedSpeed*angle_diff
-    right = combinedSpeed+combinedSpeed*angle_diff
+    speedDif = combinedSpeed*angle_diff*scalar
+    left = baseSpeed+speedDif
+    right = baseSpeed-speedDif
+    
+    rospy.logerr("motorForce force_angle: {}, botAngle: {}, angle_diff: {}, speedDif: {}, left: {}, right: {}".format(force_angle, robot.pose[2], angle_diff, speedDif, left, right))
+
     if(left > maxSpeed):
         left = maxSpeed
     elif(left < minSpeed):
@@ -283,7 +330,16 @@ def drive_from_force(force, robot):
     elif (right < minSpeed):
         right = minSpeed
     motorCommand = "{0:.0f},{1:.0f}".format(left, right)
+    
+    left = int(left)
+    right = int(right)
 
+    if(robot.wait):
+        left = 70
+        right = 70
+    command = bytes([left, right])
+    #rospy.logerr('---------L: {0}, R: {1}, yawErr: {2}, Mag {3}, a_d: {4}'.format(left,right, speedDif, force_mag, angle_diff))
+    s.send(command)
     #if (robot == Robots[1]):
      #   print(motorCommand)
         #bob = 2+1
