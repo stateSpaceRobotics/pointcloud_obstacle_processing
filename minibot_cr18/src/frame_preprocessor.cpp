@@ -253,15 +253,16 @@ int main (int argc, char** argv)
   // Initialize ros
   ros::init (argc, argv, "frame_preprocessor");
   ros::NodeHandle nh("~");
+  ros::NodeHandle nh_pub;
 
   nh.param("accumulate_count", frames_to_accumulate, 1);
 
-  nh.param("x_min", x_min, (float) -1.89);
-  nh.param("x_max", x_max, (float) 1.89);
-  nh.param("y_min", y_min, (float) -1.0);
-  nh.param("y_max", y_max, (float) 1.0);
-  nh.param("z_min", z_min, (float) 1.5);
-  nh.param("z_max", z_max, (float) 5.0);
+  nh_pub.param("x_min", x_min, (float) -1.89);
+  nh_pub.param("x_max", x_max, (float) 1.89);
+  nh_pub.param("y_min", y_min, (float) -1.0);
+  nh_pub.param("y_max", y_max, (float) 1.0);
+  nh_pub.param("z_min", z_min, (float) 1.5);
+  nh_pub.param("z_max", z_max, (float) 5.0);
 
   nh.param("block_size", block_size, (float) 0.15);
   nh.param("dev_percent", dev_percent, (float) 0.5);

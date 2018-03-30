@@ -88,8 +88,6 @@ int euc_min_cluster_size;
 int euc_max_cluster_size;
 float convex_hull_alpha;
 
-int frames_accumulated;
-
 
 void downsample_cloud(const pcl::PCLPointCloud2ConstPtr& input_cloud, pcl::PCLPointCloud2& output_cloud, float leaf_size,
                       ros::Publisher &pub, bool publish)
@@ -458,35 +456,31 @@ int main (int argc, char** argv)
 {
   // Initialize ROS
   ros::init (argc, argv, "obstacle_detection");
-  ros::NodeHandle nh;
+  ros::NodeHandle nh ("~");
+  ros::NodeHandle nh_pub;
 
-  downsample_input_data = true;  // make the dataset smaller (and faster to process)
-  passthrough_filter_enable = true;  // do we wanna cut things out? (useful for trimming the points down to the dimensions of the field)
+  nh.param("downsample_input_data", downsample_input_data, true);  // make the dataset smaller (and faster to process)
+  nh.param("passthrough_filter_enable", passthrough_filter_enable, true);  // do we wanna cut things out? (useful for trimming the points down to the dimensions of the field)
 
-  pt_lower_lim_y = -0.5;  // upper limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
-  pt_upper_lim_y = 0.6;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
+  nh_pub.param("x_min", pt_lower_lim_x, (float) -1.0);  // lower lim on x axis for passthrough filter
+  nh_pub.param("x_max", pt_upper_lim_x, (float) 1.0);  // upper lim on x axis for passthrough filter
+  nh_pub.param("y_min", pt_lower_lim_y, (float) -0.5);  // upper limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
+  nh_pub.param("y_max", pt_upper_lim_y, (float) 0.6);  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
+  nh_pub.param("z_min", pt_lower_lim_z, (float) 0);  // lower lim on z axis for passthrough filter
+  nh_pub.param("z_max", pt_upper_lim_z, (float)-0.5);  // upper lim on z axis for passthrough filter
 
-  pt_lower_lim_x = -1.0;  // lower lim on x axis for passthrough filter
-  pt_upper_lim_x = 1.0;   // upper lim on x axis for passthrough filter
+  nh.param("downsample_size", downsample_leaf_size, (float)0.015);  // for VoxelGrid (default: 0.1)
 
-  pt_lower_lim_z = 0;     // lower lim on z axis for passthrough filter
-  pt_upper_lim_z = 5;  // upper lim on z axis for passthrough filter
+  nh.param("statistical_outlier_meanK", statistical_outlier_meanK, 15);  // how many neighbor points to examine? (default: 50)
+  nh.param("statistical_outlier_stdDevThres", statistical_outlier_stdDevThres, (float)1.0);  // deviation multiplier (default: 1.0)
 
+  nh.param("plane_segment_dist_thresh", plane_segment_dist_thres, (float)0.040);  // how close to be an inlier? (default: 0.01) Hella sensitive!
+  nh.param("plane_segment_angle", plane_segment_angle, 20);
 
-  downsample_leaf_size = 0.015;  // for VoxelGrid (default: 0.1)
-
-  statistical_outlier_meanK = 15;  // how many neighbor points to examine? (default: 50)
-  statistical_outlier_stdDevThres = 1.0;  // deviation multiplier (default: 1.0)
-
-  plane_segment_dist_thres = 0.040;  // how close to be an inlier? (default: 0.01) Hella sensitive!
-  plane_segment_angle = 20;
-
-  euc_cluster_tolerance = 0.4;
-  euc_min_cluster_size = 5;  // min # of points in an object cluster
-  euc_max_cluster_size = 20000;  // max # of points in an object cluster
-  convex_hull_alpha = 180.0;  // max internal angle of the geometric shape formed by points.
-
-  frames_accumulated = 4; // must have an int square root (really good to know)
+  nh.param("euc_cluster_tolerance", euc_cluster_tolerance, (float)0.4);
+  nh.param("euc_min_cluster_size", euc_min_cluster_size, 5);  // min # of points in an object cluster
+  nh.param("euc_max_cluster_size", euc_max_cluster_size, 20000);  // max # of points in an object cluster
+  nh.param("convex_hull_alpha", convex_hull_alpha, (float)180.0);  // max internal angle of the geometric shape formed by points.
 
   // Create a ROS subscriber for the input point cloud
   ros::Subscriber sub = nh.subscribe (point_topic, 1, cloud_cb);
