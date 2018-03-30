@@ -53,12 +53,6 @@
 #include <pcl/surface/convex_hull.h>
 #include <pcl/surface/concave_hull.h>
 
-// edge detection
-#include <pcl/features/organized_edge_detection.h>
-#include <pcl/features/impl/organized_edge_detection.hpp>
-#include <pcl/features/integral_image_normal.h>
-#include <sensor_msgs/point_cloud_conversion.h>
-
 
 // very bad, no good global variables init
 ros::Publisher downsample_publisher;
@@ -67,18 +61,13 @@ ros::Publisher indices_cloud_publisher;
 ros::Publisher planar_cloud_publisher;
 ros::Publisher filtered_cloud_publisher;
 ros::Publisher centroid_publisher;
-ros::Publisher edge_cloud_publisher;
-ros::Publisher filtered_edge_cloud_publisher;
 ros::Publisher euc_cluster_publisher;
-ros::Publisher hole_centroid_publisher;
-ros::Publisher hole_cluster_publisher;
 
 const char *point_topic = "/NASA_ARMS/obstacle_preprocessor/accumulated_depth_1";  // where are we getting the depth data from?
 //const char *point_topic = "/kinect2/sd/points";
 
 bool downsample_input_data;
 bool passthrough_filter_enable;
-bool edge_detection;
 float pt_upper_lim_y;
 float pt_lower_lim_y;
 float pt_upper_lim_x;
@@ -99,9 +88,6 @@ int euc_min_cluster_size;
 int euc_max_cluster_size;
 float convex_hull_alpha;
 
-float hole_euc_cluster_tolerance;
-float edge_depth_tolerance;
-int edge_max_neighbor_search;
 int frames_accumulated;
 
 
@@ -363,79 +349,6 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
   }
 }
 
-// TODO: Remove me
-void detect_edges(pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, pcl::PointCloud<pcl::PointXYZ>::Ptr &output_cloud,
-                  float depth_dist, int neighbors, ros::Publisher &pub, bool publish)
-{
-  // TODO: Document!
-  // TODO: parameterize!
-  // TODO: understand what the hell this does
-
-  pcl::PointCloud<pcl::Normal>::Ptr normal (new pcl::PointCloud<pcl::Normal>);
-  /*
-  pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
-  pcl::search::KdTree<pcl::PointXYZ>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZ> ());
-  ne.setSearchMethod(tree);
-  ne.setRadiusSearch(0.4);
-  */
-
-  if (frames_accumulated > 1)
-  {
-    input_cloud->resize(540*960*frames_accumulated);
-    input_cloud->height = 540*sqrt(frames_accumulated);
-    input_cloud->width = 960*sqrt(frames_accumulated);
-    input_cloud->is_dense = false;
-
-  }
-
-  pcl::IntegralImageNormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
-  ne.setNormalEstimationMethod (ne.COVARIANCE_MATRIX);
-  ne.setNormalSmoothingSize (10.0f);
-  ne.setBorderPolicy (ne.BORDER_POLICY_MIRROR);
-
-
-  ne.setInputCloud (input_cloud);
-  ne.compute (*normal);
-
-  pcl::OrganizedEdgeFromNormals<pcl::PointXYZ, pcl::Normal, pcl::Label> oed;
-  //pcl::OrganizedEdgeBase<pcl::PointXYZ, pcl::Label> oed;
-
-  oed.setInputNormals (normal);
-  oed.setInputCloud (input_cloud);
-  oed.setDepthDisconThreshold (depth_dist);  // *apparently* this makes it more sensitive.
-  oed.setMaxSearchNeighbors (neighbors);  // TODO:: what even?
-  oed.setEdgeType (oed.EDGELABEL_NAN_BOUNDARY | oed.EDGELABEL_OCCLUDING | oed.EDGELABEL_OCCLUDED | oed.EDGELABEL_HIGH_CURVATURE | oed.EDGELABEL_RGB_CANNY);
-
-  pcl::PointCloud<pcl::Label> labels;
-  std::vector<pcl::PointIndices> label_indices;
-  oed.compute (labels, label_indices);
-
-  pcl::PointCloud<pcl::PointXYZ>::Ptr occluding_edges (new pcl::PointCloud<pcl::PointXYZ>),
-          occluded_edges (new pcl::PointCloud<pcl::PointXYZ>),
-          nan_boundary_edges (new pcl::PointCloud<pcl::PointXYZ>),
-          high_curvature_edges (new pcl::PointCloud<pcl::PointXYZ>),
-          rgb_edges (new pcl::PointCloud<pcl::PointXYZ>);
-
-  copyPointCloud (*input_cloud, label_indices[0].indices, *nan_boundary_edges);
-  copyPointCloud (*input_cloud, label_indices[1].indices, *occluding_edges);
-  copyPointCloud (*input_cloud, label_indices[2].indices, *occluded_edges);
-  copyPointCloud (*input_cloud, label_indices[3].indices, *high_curvature_edges);
-  copyPointCloud (*input_cloud, label_indices[4].indices, *rgb_edges);
-
-  *output_cloud += *occluding_edges;
-  //*output_cloud += *occluded_edges;
-  //*output_cloud += *nan_boundary_edges;
-
-  output_cloud->header.frame_id = "/kinect2_link";
-
-  if (publish)
-  {
-    sensor_msgs::PointCloud2 publish_edge_cloud;
-    pcl::toROSMsg(*output_cloud, publish_edge_cloud);
-    pub.publish(publish_edge_cloud);
-  }
-}
-
 
 void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 {
@@ -453,17 +366,6 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr statistical_outlier_input_cloud (new pcl::PointCloud<pcl::PointXYZ>);  // new point cloud to use in PCL
   pcl::PointCloud<pcl::PointXYZ> statistical_outlier_output_cloud;
-
-
-  // ----------- edge detection for hole detection ----------------------
-  // TODO: Remove me
-  pcl::PointCloud<pcl::PointXYZ>::Ptr edge_cloud_output (new pcl::PointCloud<pcl::PointXYZ>);
-  if (edge_detection) {
-    pcl::fromPCLPointCloud2(*initial_cloud, *statistical_outlier_input_cloud);
-    detect_edges(statistical_outlier_input_cloud, edge_cloud_output, edge_depth_tolerance, edge_max_neighbor_search,
-                 edge_cloud_publisher, true);
-  }
-
 
 
     // ---------------------- downsampling --------------------------------
@@ -486,18 +388,6 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
     passthrough_filter(statistical_outlier_input_cloud, "y", pt_lower_lim_y, pt_upper_lim_y);  // limits up/down input size
     passthrough_filter(statistical_outlier_input_cloud, "x", pt_lower_lim_x, pt_upper_lim_x);  // limits left/right input size
     passthrough_filter(statistical_outlier_input_cloud, "z", pt_lower_lim_z, pt_upper_lim_z);  // limits forward/backward input size
-
-    if (edge_detection)
-    {
-      passthrough_filter(edge_cloud_output, "y", pt_lower_lim_y, pt_upper_lim_y);  // limits up/down input size
-      passthrough_filter(edge_cloud_output, "x", pt_lower_lim_x, pt_upper_lim_x);  // limits left/right input size
-      passthrough_filter(edge_cloud_output, "z", pt_lower_lim_z, pt_upper_lim_z);  // limits forward/backward input size
-
-      sensor_msgs::PointCloud2 published_edge_cloud;
-      pcl::toROSMsg(*edge_cloud_output, published_edge_cloud);
-      filtered_edge_cloud_publisher.publish(published_edge_cloud);
-    }
-
   }
 
 
@@ -538,19 +428,6 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   extract_euclidian_clusters(planar_cloud_y, euc_cluster_indices, euc_cluster_tolerance, euc_min_cluster_size,
                              euc_max_cluster_size, euc_cluster_tree);
 
-  // cluster extraction for the holes
-  pcl::search::KdTree<pcl::PointXYZ>::Ptr hole_euc_cluster_tree (new pcl::search::KdTree<pcl::PointXYZ>);
-  std::vector<pcl::PointIndices> hole_euc_cluster_indices;
-
-  if (edge_detection)
-  {
-    hole_euc_cluster_tree->setInputCloud(edge_cloud_output);
-
-    extract_euclidian_clusters(edge_cloud_output, hole_euc_cluster_indices, hole_euc_cluster_tolerance, euc_min_cluster_size,
-      euc_max_cluster_size, hole_euc_cluster_tree);
-
-  }
-
 
   // ---------------------- cluster cloud creation ------------------------
   // create a Point Cloud containing the points of of the clusters (just the outline points)
@@ -560,24 +437,6 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   int cluster_count;  // how many clusters detected?
 
   create_cluster_cloud(planar_cloud_y, euc_cluster_indices, clustered_cloud, cluster_count, centroids);
-
-  // hole cluster cloud creation
-  int hole_cluster_count;
-  NASA_ARMS::PointIndicesArray hole_centroids;
-  pcl::PointCloud<pcl::PointXYZ>::Ptr hole_clustered_cloud (new pcl::PointCloud<pcl::PointXYZ>);
-  sensor_msgs::PointCloud2::Ptr hole_clusters (new sensor_msgs::PointCloud2);
-
-  if (edge_detection)
-  {
-
-    create_cluster_cloud(edge_cloud_output, hole_euc_cluster_indices, hole_clustered_cloud, hole_cluster_count,
-      hole_centroids);
-
-    // combine the centroids from the holes and the regular obstacles
-
-    centroids.points.reserve(centroids.points.size() + hole_centroids.points.size());
-    centroids.points.insert(centroids.points.end(), hole_centroids.points.begin(), hole_centroids.points.end());
-  }
 
 
   // -------- Publish results --------------
@@ -590,22 +449,8 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
   euc_cluster_publisher.publish(clusters);
 
-
-  // hole publish results
-  if (edge_detection)
-  {
-    hole_centroid_publisher.publish(hole_centroids);
-
-    pcl::toROSMsg(*hole_clustered_cloud, *hole_clusters);
-
-    hole_clusters->header.frame_id = "/kinect2_link";
-    hole_clusters->header.stamp = ros::Time::now();
-    hole_cluster_publisher.publish(hole_clusters);
-
-  }
-
   std::cout << " ----------- " << std::endl;
-  std::cout << "clusters found: " << cluster_count << " hole clusters found: " << hole_cluster_count << " combined size: " << centroids.points.size() << std::endl;
+  std::cout << "clusters found: " << cluster_count << " combined size: " << centroids.points.size() << std::endl;
 
 }
 
@@ -617,7 +462,6 @@ int main (int argc, char** argv)
 
   downsample_input_data = true;  // make the dataset smaller (and faster to process)
   passthrough_filter_enable = true;  // do we wanna cut things out? (useful for trimming the points down to the dimensions of the field)
-  edge_detection = false;  // do we wanna see holes? (but slowly)
 
   pt_lower_lim_y = -0.5;  // upper limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
   pt_upper_lim_y = 0.6;  // lower limit on the y axis filtered by the passthrough filter (INVERTED B/C KINECT)
@@ -642,10 +486,6 @@ int main (int argc, char** argv)
   euc_max_cluster_size = 20000;  // max # of points in an object cluster
   convex_hull_alpha = 180.0;  // max internal angle of the geometric shape formed by points.
 
-  hole_euc_cluster_tolerance = 0.02;
-  edge_depth_tolerance = 0.1;
-  edge_max_neighbor_search = 100;
-
   frames_accumulated = 4; // must have an int square root (really good to know)
 
   // Create a ROS subscriber for the input point cloud
@@ -658,11 +498,7 @@ int main (int argc, char** argv)
   planar_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("planar_cloud", 1000);
   filtered_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("cloud_f", 1000);
   centroid_publisher = nh.advertise<NASA_ARMS::PointIndicesArray>("centroids", 1);
-  edge_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("edge_cloud", 1);
   euc_cluster_publisher = nh.advertise<sensor_msgs::PointCloud2> ("euc_clusters", 5);
-  filtered_edge_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2> ("edge_cloud_filtered", 1);
-  hole_centroid_publisher = nh.advertise<NASA_ARMS::PointIndicesArray>("hole_centroids", 1);
-  hole_cluster_publisher = nh.advertise<sensor_msgs::PointCloud2>("hole_euc_clusters", 1);
 
   // Spin
   ros::spin ();
