@@ -1,12 +1,12 @@
 NASA_ARMS:
         obstacle_preprocessor:
-                accumulate_count: 16
+                accumulate_count: 4
                 x_min: -1.0
                 x_max: 0.9
                 y_min: -1.0
                 y_max: 1.0
                 z_min: 1.0
-                z_max: 5.0
+                z_max: 4.5
                 
-                block_size: 0.15
-                dev_percent: 0.5
+                block_size: 0.0375
+                dev_percent: 0.9

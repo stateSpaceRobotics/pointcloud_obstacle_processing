@@ -73,7 +73,7 @@ ros::Publisher euc_cluster_publisher;
 ros::Publisher hole_centroid_publisher;
 ros::Publisher hole_cluster_publisher;
 
-const char *point_topic = "/accumulated_depth_1";  // where are we getting the depth data from?
+const char *point_topic = "/NASA_ARMS/obstacle_preprocessor/accumulated_depth_1";  // where are we getting the depth data from?
 //const char *point_topic = "/kinect2/sd/points";
 
 bool downsample_input_data;
