@@ -9,10 +9,10 @@ NASA_ARMS:
         obstacle_preprocessor:
                 accumulate_count: 2
 
+        obstacle_processor:
                 block_size: 0.0375
                 dev_percent: 0.9
 
-        obstacle_detection:
                 downsame_input_data: true
                 downsample_size: 0.015
 

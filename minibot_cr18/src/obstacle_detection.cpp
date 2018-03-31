@@ -53,6 +53,9 @@
 #include <pcl/surface/convex_hull.h>
 #include <pcl/surface/concave_hull.h>
 
+// Occupancy Grid
+#include <nav_msgs/OccupancyGrid.h>
+
 
 // very bad, no good global variables init
 ros::Publisher downsample_publisher;
@@ -62,9 +65,20 @@ ros::Publisher planar_cloud_publisher;
 ros::Publisher filtered_cloud_publisher;
 ros::Publisher centroid_publisher;
 ros::Publisher euc_cluster_publisher;
+ros::Publisher occupancy_grid_publisher;
 
 const char *point_topic = "/NASA_ARMS/obstacle_preprocessor/accumulated_depth_1";  // where are we getting the depth data from?
 //const char *point_topic = "/kinect2/sd/points";
+
+
+float block_size;
+float dev_percent;
+
+int occupancy_grid_width;
+int occupancy_grid_height;
+int occupancy_grid_size;
+long long *occupancy_grid_pt_counts;
+long long *row_averages;
 
 bool downsample_input_data;
 bool passthrough_filter_enable;
@@ -88,6 +102,123 @@ int euc_min_cluster_size;
 int euc_max_cluster_size;
 float convex_hull_alpha;
 
+
+// TODO: Document
+int get_occupancy_grid_location(float x, float z, float x_min, float z_max, float block_size, int occupancy_grid_width, int occupancy_grid_height)
+{
+  int x_count = 0;
+  int y_count = 0;
+
+  while (x_min + (x_count + 1)*block_size < x)
+  {
+    x_count++;
+  }
+
+  while (z_max - (y_count + 1)*block_size > z)
+  {
+    y_count++;
+  }
+  //int result = y_count*occupancy_grid_width + x_count;
+  return y_count*occupancy_grid_width + x_count;
+
+
+  /*
+  int x_index;
+  int y_index;
+  x = x + 2;
+
+  x_index = (int)(x / block_size);
+  y_index = (int)(y / block_size);
+
+  x_index = (x_index >= occupancy_grid_width) ? occupancy_grid_width - 1: x_index;
+  y_index = (y_index >= occupancy_grid_height) ? occupancy_grid_height - 1 : y_index;
+
+  return y_index * occupancy_grid_width + x_index;
+  */
+}
+
+void build_initial_occupancy_grid_dataset(int grid_size, int grid_height, int grid_width, char* grid_data, float x_min, float x_max,
+                                          float y_min, float y_max, float z_min, float z_max, long long *point_count_array,
+                                          long long *row_point_averages, pcl::PointCloud<pcl::PointXYZ>& input_cloud,
+                                          pcl::PointCloud<pcl::PointXYZ>& output_cloud)
+{
+  int nan_count = 0;
+  int point_count = 0;
+  int occupied = 0;
+
+  for (int i = 0 ; i < grid_size; i++) {
+    point_count_array[i] = 0;
+  }
+
+  for (int i = 0 ; i < occupancy_grid_height; i++) {
+    row_averages[i] = 0;
+  }
+
+  for(int i = 0; i < static_cast<int> (input_cloud.points.size()); ++i)  // iterate through all points and place them in an occupancy grid
+  {
+    if (pcl_isnan(input_cloud.points[i].x) || input_cloud.points[i].x < x_min || input_cloud.points[i].x > x_max
+        || input_cloud.points[i].z < z_min || input_cloud.points[i].z > z_max || input_cloud.points[i].y < y_min || input_cloud.points[i].y > y_max){
+      continue;  // don't count NaN points or out of bounds points.
+    }
+
+    point_count_array[get_occupancy_grid_location(input_cloud.points[i].x, input_cloud.points[i].z, x_min, z_max,
+                                                  block_size, grid_width, grid_height)]++;  // determine location in grid for point
+    point_count++;
+
+    output_cloud.push_back(input_cloud.points[i]);
+  }
+
+  //std::cout << nan_count<< std::endl;
+
+  //std::cout << "Occupancy_Grid size: " << occupancy_grid_size << std::endl;
+  //std::cout << "Block size: " << block_size << " height: " << occupancy_grid_height << " width: " << occupancy_grid_width << std::endl;
+
+  long long row_point_count = 0;
+
+  for (int row_ind = 0; row_ind < grid_height; row_ind++)  // compute averages for each row in point cloud.
+  {
+    row_point_count = 0;
+    for (int col_ind = 0; col_ind < grid_width; col_ind++)
+    {
+      row_point_count += point_count_array[row_ind*grid_width + col_ind];
+    }
+    row_point_averages[row_ind] = row_point_count / grid_width;
+  }
+
+
+  // create the occupancy grid here
+  //char *occupancy_grid_data = new char[grid_size];
+  int row_count = 0;
+
+  for (int i = 0; i < occupancy_grid_size; i++)
+  {
+
+    long long current_row_avg = row_averages[(int)(i / occupancy_grid_width)];
+
+    /*
+    int percent = 0;
+
+    if(current_row_avg > 0)
+    {
+      percent = (1 - (occupancy_grid_pt_counts[i] / current_row_avg) * 100);
+    }
+
+    if(percent < 0) percent = 0;
+    occupancy_grid_data[i] = percent;
+    */
+
+    if (occupancy_grid_pt_counts[i] < current_row_avg * (1-dev_percent))
+    {
+      grid_data[i] = 100;
+
+    } else {
+
+      grid_data[i] = 0;
+    }
+
+    //occupancy_grid_data[i] = (occupancy_grid_pt_counts[i] < row_averages[(int)(i / occupancy_grid_width)] * (1-dev_percent)) ? 100 : 0;
+  }
+}
 
 void downsample_cloud(const pcl::PCLPointCloud2ConstPtr& input_cloud, pcl::PCLPointCloud2& output_cloud, float leaf_size,
                       ros::Publisher &pub, bool publish)
@@ -362,11 +493,22 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   // Convert to PCLPointCloud2 data type from ROS sensor_msgs
   pcl_conversions::toPCL(*cloud_msg, *initial_cloud);
 
+  pcl::PointCloud<pcl::PointXYZ>::Ptr passthrough_cloud (new pcl::PointCloud<pcl::PointXYZ>);  // for the occupancy grid
+
   pcl::PointCloud<pcl::PointXYZ>::Ptr statistical_outlier_input_cloud (new pcl::PointCloud<pcl::PointXYZ>);  // new point cloud to use in PCL
   pcl::PointCloud<pcl::PointXYZ> statistical_outlier_output_cloud;
 
+  // --------------------- detect holes and build the occupancy grid -----
+  pcl::fromPCLPointCloud2(*initial_cloud, *passthrough_cloud);  // convert PCLPointCloud2 to PointCloud<PointXYZ> for processing (annoying, but seemingly necessary)
+  char *occupancy_grid_data = new char[occupancy_grid_size];
 
-    // ---------------------- downsampling --------------------------------
+  build_initial_occupancy_grid_dataset(occupancy_grid_size, occupancy_grid_height, occupancy_grid_width, occupancy_grid_data, pt_lower_lim_x,
+                                       pt_upper_lim_x, pt_lower_lim_y, pt_upper_lim_y, pt_lower_lim_z, pt_upper_lim_z,
+                                       occupancy_grid_pt_counts, row_averages, *passthrough_cloud, *statistical_outlier_input_cloud);
+
+
+  // TODO: move this to happen after the passthrough filtering (should be faster that way)
+  // ---------------------- downsampling --------------------------------
   if (downsample_input_data)  // reduce the number of points we have to work with
   {
   	pcl::PCLPointCloud2 cloud_filtered;
@@ -380,7 +522,6 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   }
 
   // --------------------- passthrough filtering ------------------------
-  // TODO: Remove this since it's being handled by the frame_preprocessor now
   if (passthrough_filter_enable)  // chop off points above and below certain values along a specified plane_axis
   {
     passthrough_filter(statistical_outlier_input_cloud, "y", pt_lower_lim_y, pt_upper_lim_y);  // limits up/down input size
@@ -436,6 +577,13 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
   create_cluster_cloud(planar_cloud_y, euc_cluster_indices, clustered_cloud, cluster_count, centroids);
 
+  nav_msgs::OccupancyGrid *occupancyGrid = new nav_msgs::OccupancyGrid();
+  occupancyGrid->info.resolution = block_size;
+  occupancyGrid->info.width = occupancy_grid_width;
+  occupancyGrid->info.height = occupancy_grid_height;
+  occupancyGrid->data = std::vector<int8_t>(occupancy_grid_data, occupancy_grid_data + occupancy_grid_size);
+
+  occupancy_grid_publisher.publish(*occupancyGrid);
 
   // -------- Publish results --------------
   centroid_publisher.publish(centroids);
@@ -469,6 +617,15 @@ int main (int argc, char** argv)
   nh_pub.param("z_min", pt_lower_lim_z, (float) 0);  // lower lim on z axis for passthrough filter
   nh_pub.param("z_max", pt_upper_lim_z, (float)-0.5);  // upper lim on z axis for passthrough filter
 
+  nh.param("block_size", block_size, (float) 0.15);
+  nh.param("dev_percent", dev_percent, (float) 0.5);
+
+  occupancy_grid_width = (int)ceil((fabs(pt_lower_lim_x) + fabs(pt_upper_lim_x)) / block_size);
+  occupancy_grid_height = (int)ceil((fabs(pt_upper_lim_z) - fabs(pt_lower_lim_z)) / block_size);
+  occupancy_grid_size = occupancy_grid_width * occupancy_grid_height;
+  occupancy_grid_pt_counts = new long long[occupancy_grid_size];
+  row_averages = new long long[occupancy_grid_height];
+
   nh.param("downsample_size", downsample_leaf_size, (float)0.015);  // for VoxelGrid (default: 0.1)
 
   nh.param("statistical_outlier_meanK", statistical_outlier_meanK, 15);  // how many neighbor points to examine? (default: 50)
@@ -493,6 +650,7 @@ int main (int argc, char** argv)
   filtered_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("cloud_f", 1000);
   centroid_publisher = nh.advertise<NASA_ARMS::PointIndicesArray>("centroids", 1);
   euc_cluster_publisher = nh.advertise<sensor_msgs::PointCloud2> ("euc_clusters", 5);
+  occupancy_grid_publisher = nh.advertise<nav_msgs::OccupancyGrid> ("occupancy_grid", 1);
 
   // Spin
   ros::spin ();
