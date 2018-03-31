@@ -35,13 +35,8 @@ int occupancy_grid_size;
 long long *occupancy_grid_pt_counts;
 long long *row_averages;
 
-struct point {
-    float x;
-    float y;
-    float z;
-};
 
-const char *point_topic = "/kinect2/sd/points";
+const char *point_topic = "/kinect2/qhd/points";
 
 pcl::PointCloud<pcl::PointXYZ> final_cloud;  // TODO: Should really pre-allocate enough memory initially for performance
 
@@ -115,45 +110,38 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   ros_cloud->header.frame_id = "/kinect2_link";
   ros_cloud->header.stamp = ros::Time::now();
   */
-  for (int i = 0 ; i < occupancy_grid_size; i++)
-  {
-    occupancy_grid_pt_counts[i] = 0;
-  }
-  for (int i = 0 ; i < occupancy_grid_height; i++)
-  {
-    row_averages[i] = 0;
-  }
+
   passthrough_filter(accumulator_input_cloud, "x", x_min, x_max);
   passthrough_filter(accumulator_input_cloud, "y", y_min, y_max);
   passthrough_filter(accumulator_input_cloud, "z", z_min, z_max);
 
   if (current_frame_count < frames_to_accumulate)  // don't have enough frames yet
   {
-
-
     final_cloud += *accumulator_input_cloud;
     current_frame_count += 1;
-    /*
+
     //std::cout << "frame " << current_frame_count << " processed." << std::endl;
     //std::cout << "point count: " << point_count << std::endl;
     // for debugging purposes:
     //std::cout << "width: " << accumulator_input_cloud->width << std::endl;
     //std::cout << "height: " << accumulator_input_cloud->height << std::endl;
-    */
+
   } else {  // sufficient number of frames, go ahead and publish to the main obstacle program.
 
     sensor_msgs::PointCloud2 ros_cloud;
 
     int nan_count = 0;
-    /*
-    float inc_value = 0.001;
-    point most_recent_point;
-    most_recent_point.x = 0;
-    most_recent_point.y = 0;
-    most_recent_point.z = 0;
-    */
     int point_count = 0;
     int occupied = 0;
+
+    for (int i = 0 ; i < occupancy_grid_size; i++)
+    {
+      occupancy_grid_pt_counts[i] = 0;
+    }
+    for (int i = 0 ; i < occupancy_grid_height; i++)
+    {
+      row_averages[i] = 0;
+    }
 
     for(int i = 0; i < static_cast<int> (final_cloud.points.size()); ++i)  // iterate through all points and place them in an occupancy grid
     {
@@ -166,8 +154,8 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
     //std::cout << nan_count<< std::endl;
 
-    std::cout << "Occupancy_Grid size: " << occupancy_grid_size << std::endl;
-    std::cout << "Block size: " << block_size << " height: " << occupancy_grid_height << " width: " << occupancy_grid_width << std::endl;
+    //std::cout << "Occupancy_Grid size: " << occupancy_grid_size << std::endl;
+    //std::cout << "Block size: " << block_size << " height: " << occupancy_grid_height << " width: " << occupancy_grid_width << std::endl;
 
     long long row_point_count = 0;
 
@@ -181,14 +169,6 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
       row_averages[row_ind] = row_point_count / occupancy_grid_width;
     }
 
-    for (int i = 0 ; i < occupancy_grid_size; i++)  // count how many grid cells are occupied (not necessary, debug only)
-    {
-      if (occupancy_grid_pt_counts[i] != 0){
-        occupied += 1;
-      }
-
-      //std::cout << occupancy_grid_pt_counts[i] << std::endl;
-    }
 
     // create the occupancy grid here
     char *occupancy_grid_data = new char[occupancy_grid_size];
@@ -198,6 +178,7 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
     {
 
       long long current_row_avg = row_averages[(int)(i / occupancy_grid_width)];
+
       /*
       int percent = 0;
 
@@ -209,6 +190,7 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
       if(percent < 0) percent = 0;
       occupancy_grid_data[i] = percent;
       */
+
       if (occupancy_grid_pt_counts[i] < current_row_avg * (1-dev_percent))
       {
         occupancy_grid_data[i] = 100;
@@ -229,8 +211,7 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
 
     occupancy_grid_publisher.publish(*occupancyGrid);
 
-
-    std::cout << "Percent occupied: " << ((float)occupied / occupancy_grid_size) * 100 << std::endl;  // how many cells are occupied? (debug only)
+    //std::cout << "Percent occupied: " << ((float)occupied / occupancy_grid_size) * 100 << std::endl;  // how many cells are occupied? (debug only)
 
     pcl::toROSMsg(final_cloud, ros_cloud);
 
@@ -240,9 +221,10 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
     concatenated_publisher.publish(ros_cloud);
 
     //std::cout << " total points: " << final_cloud.points.size() << std::endl;
-    std::cout << "----------------- frame count reset " << count << " -------------- " << std::endl;
+    //std::cout << "----------------- frame count reset " << count << " -------------- " << std::endl;
     count++;
     final_cloud.clear();
+    //final_cloud.reserve(frames_to_accumulate * topic_size);
     current_frame_count = 0;
   }
 
@@ -255,7 +237,7 @@ int main (int argc, char** argv)
   ros::NodeHandle nh("~");
   ros::NodeHandle nh_pub;
 
-  nh.param("accumulate_count", frames_to_accumulate, 1);
+  nh.param("accumulate_count", frames_to_accumulate, 2);
 
   nh_pub.param("x_min", x_min, (float) -1.89);
   nh_pub.param("x_max", x_max, (float) 1.89);
@@ -273,15 +255,8 @@ int main (int argc, char** argv)
   occupancy_grid_pt_counts = new long long[occupancy_grid_size];
   row_averages = new long long[occupancy_grid_height];
 
-
-  //frames_to_accumulate = 4; // can't be zero :-)
   current_frame_count = 0;
   count = 0;
-
-  // values for passthrough filter
-
-
-  //final_cloud = new pcl::PointCloud<pcl::PointXYZ>;
 
   ros::Subscriber sub = nh.subscribe (point_topic, 1, frame_callback);
 
