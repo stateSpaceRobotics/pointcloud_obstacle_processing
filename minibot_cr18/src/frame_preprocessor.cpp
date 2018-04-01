@@ -19,37 +19,9 @@ int frames_to_accumulate;
 int current_frame_count;
 int count;
 
-float x_min;  // -2.0
-float y_min;
-float z_min;  // 0.0
-float x_max;  // 2.0
-float y_max;
-float z_max;  // 4.0
-
-
-const char *point_topic = "/kinect2/sd/points";
+const char *point_topic = "/kinect2/qhd/points";
 
 pcl::PointCloud<pcl::PointXYZ> final_cloud;  // TODO: Should really pre-allocate enough memory initially for performance
-
-
-void passthrough_filter(pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud, const char *axis, float lower_lim, float upper_lim)
-{
-  /* COPIED FROM obstacle_detection.cpp
-   * Runs the input_cloud through a passthrough filter, which basically throws out all data points
-   * above upper_lim and below lower_lim along the specified axis. Useful for reducing the number of
-   * errenous obstacles detected, and to some extent reducing the processing overhead.
-   *
-   * Returns the concatenated cloud data in the input cloud.
-   */
-  pcl::PointCloud<pcl::PointXYZ> xyz_intermediate;
-  pcl::PassThrough<pcl::PointXYZ> pass;
-  pass.setInputCloud(input_cloud);
-  pass.setFilterFieldName(axis);  // apparently this was the problem.
-  pass.setFilterLimits(lower_lim, upper_lim);
-  pass.filter(xyz_intermediate);
-
-  input_cloud = xyz_intermediate.makeShared();
-}
 
 
 void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
@@ -67,10 +39,6 @@ void frame_callback( const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
   ros_cloud->header.frame_id = "/kinect2_link";
   ros_cloud->header.stamp = ros::Time::now();
   */
-
-  passthrough_filter(accumulator_input_cloud, "x", x_min, x_max);
-  passthrough_filter(accumulator_input_cloud, "y", y_min, y_max);
-  passthrough_filter(accumulator_input_cloud, "z", z_min, z_max);
 
   if (current_frame_count < frames_to_accumulate)  // don't have enough frames yet
   {
@@ -114,15 +82,6 @@ int main (int argc, char** argv)
   ros::NodeHandle nh_pub;
 
   nh.param("accumulate_count", frames_to_accumulate, 2);
-
-  nh_pub.param("x_min", x_min, (float) -1.89);
-  nh_pub.param("x_max", x_max, (float) 1.89);
-  nh_pub.param("y_min", y_min, (float) -1.0);
-  nh_pub.param("y_max", y_max, (float) 1.0);
-  nh_pub.param("z_min", z_min, (float) 1.5);
-  nh_pub.param("z_max", z_max, (float) 5.0);
-
-
 
   current_frame_count = 0;
   count = 0;
