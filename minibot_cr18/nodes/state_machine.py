@@ -15,23 +15,99 @@ from builtins import bytes
 
 TCP_IP = '192.168.4.1'
 TCP_PORT = 9999
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.connect((TCP_IP, TCP_PORT))
+#s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#s.connect((TCP_IP, TCP_PORT))
 
 class Robot:
     def __init__(self):
         self.wait = True
         #self.wait = False
-        self.state = 4
+        self.state = 2
         #self.state = 5
         self.pose = [0,0,0]
         self.waitingOn = None
         self.count = 0
         self.turn = 0
 
-#Goals = [(3, -1), (5,0), (3, .5), (2, .5), (1, 0), (2, -.5)]
-Goals = [(4, -.5), (5,0), (4, .3), (2, .3), (1, 0), (1, -.3)]
-stateCount = len(Goals)
+
+import random
+Goals = []
+obstacleList = []
+# 3.8m with 0.1m per block
+width = 38
+height = 35
+upperLowerBound = 3.0
+offsetY = 1.2
+offsetX = width/20.0
+scale = 10.0
+
+# for count in range(5):
+#     obstacleList.append((random.randint(0,width-1), random.randint(upperLowerBound,height-upperLowerBound)))
+
+#obstacleList.append((5, 5))
+costList = [[0] * width for i in range(height)]
+step = 2
+tupleList = [(1,0), (-1,0), (0, 1), (0,-1)]
+
+#walls
+for y in range(height):
+    costList[y][0] = 5
+    costList[y][width-1] = 5
+
+#costList[height-1][:] = 5
+
+
+def costPoint(cost, x, y):
+    global costList
+    global tupleList
+    if(cost == 0):
+        return
+    costList[y][x] = cost
+    for coordinate in tupleList:
+        xDiff = (x+coordinate[0])
+        yDiff = (y+coordinate[1])
+        if (xDiff < 0 or xDiff >= width or yDiff < 0 or yDiff >= height):
+            continue
+        if(cost-step > costList[yDiff][xDiff]):
+            costPoint(cost-step, xDiff, yDiff)
+
+
+def goalFormulate(goalY,step, currentY, currentX):
+    global Goals
+    global costList
+
+    while(currentY != goalY):
+        bestGoal = costList[currentY+step][currentX]
+        nextGoal = (currentX, currentY)
+        for x in range (-1,2,2):
+            if(bestGoal > costList[currentY+step][currentX+x]):
+                bestGoal = costList[currentY+step][currentX+x]
+                nextGoal = (currentX+x, currentY+step)
+        Goals.append((nextGoal[0]/scale-offsetX, nextGoal[1]/scale+offsetY))
+        currentX = nextGoal[0]
+        currentY += step
+        costList[currentY][currentX] = "*"
+
+stateCount = 0
+
+def createMap():
+    global stateCount
+    for obstacle in obstacleList:
+        costPoint(5, obstacle[0], obstacle[1])
+
+    goalFormulate(height-3, 1, -1, width - 4)
+    Goals.append((0.75, 5.5))
+    Goals.append((-0.75, 5.5))
+    goalFormulate(0, -1, height, 4)
+    Goals.append((-0.75, 1.0))
+    Goals.append((0.75, 1.0))
+
+    for each in Goals:
+        print(each)
+    #Goals = [(3, -1), (5,0), (3, .5), (2, .5), (1, 0), (2, -.5)]
+    # Goals = [(5.5,1.0), (5.5, -.75), (1.5, -.75), (1.5, 1.0)]
+    stateCount = len(Goals)
+
 Pubs = []
 Robots = []
 
@@ -40,10 +116,10 @@ Obstacles = []
 
 def obstacle_callback(obstacle_list):
     global Obstacles
+    rospy.logerr("-----------------------------------------NOPENOPENOPENOPE------------------------")
     for obstacle in obstacle_list.points:
         Obstacles.append((obstacle.z, obstacle.x))  # offset to transform KinectV2 to base station
-    
-    rospy.logerr("Obstacles: {}".format(Obstacles[0]))
+       # rospy.logerr("obstacle z: {}, obstacle x: {}".format(obstacle.z, obstacle.x))
 
 def callback(data, args):
     global Robots
@@ -51,7 +127,7 @@ def callback(data, args):
         [data.pose.pose.orientation.x, data.pose.pose.orientation.y, data.pose.pose.orientation.z,
          data.pose.pose.orientation.w])
     #args[0] = current_Robot
-    #rospy.logerr("roll: {0:2f} | p: {1:2f} | yaw: {2:2f}".format(r, p, yaw))
+    rospy.logerr("roll: {0:2f} | p: {1:2f} | yaw: {2:2f}".format(r, p, yaw))
 
     if(r<0):
         signR = -1
@@ -65,7 +141,7 @@ def callback(data, args):
     
     botAngle = (-1)*((90-90*signR)*signP + 60*p*signR)*(math.pi) / 180
 
-    args[0].pose = [-1*data.pose.pose.position.z, data.pose.pose.position.x + .20, botAngle]
+    args[0].pose = [data.pose.pose.position.z + 4.9, -1*data.pose.pose.position.x + 0.8, botAngle]
     
     #rospy.logerr("botAngle: {0:1f}".format(botAngle))
 
@@ -96,22 +172,23 @@ def goal_force(robot):
     #rospy.logerr("in goal_force, direction: {}, angle: {}".format(direction, angle))
     force_to_goal = [strength * math.cos(angle), strength * math.sin(angle)]
     rospy.logerr("Current goal: {}, goal_x: {}, goal_y: {}".format(robot.state, goal[0], goal[1]))
-    if(mag <.5): #reached goal
-	rospy.logerr("Goal reached: {}".format(robot.state))
-        if(robot.state == 0):   #Need to stop to turn
-	    robot.count = 10
-            robot.state = (robot.state +1)% stateCount
-	    
-	    #robot.turn = -1.5
+    if(mag <.6): #reached goal
+        rospy.logerr("Goal reached: {}".format(robot.state))
+        if(robot.state == 1):   #Need to stop to turn
+            robot.count = 6
+            robot.wait = True	    #robot.count = 10
+            #robot.state = (robot.state +1)% stateCount
+        #robot.turn = -1.5
         elif (robot.state == 3):  # Need to stop to turn
-            robot.count = 10
-	    #robot.turn = 1.5
-	    robot.state = (robot.state +1)% stateCount
-        elif(robot.state == 1 or robot.state == 4):   #At load & unload
-            robot.count = 10
+            robot.count = 6
+            robot.wait = True            #robot.count = 10
+        #robot.turn = 1.5
+        #robot.state = (robot.state +1)% stateCount
+        elif(robot.state == 0 or robot.state == 2):   #At load & unload
+            robot.count = 6
             robot.wait = True
-        elif(robot.state == 2 or robot.state == 5):
-	    robot.count = 10
+        elif(robot.state == 1 or robot.state == 5):
+        #robot.count = 10
             robot.state = (robot.state +1)% stateCount
 
     # if (mag < .3 and not (robot.atLoad == True or robot.atUnload == True)):
@@ -131,8 +208,9 @@ def obstacle_force(robot):
     global Goals
     global Obstacles
     global Robots
-    obstacleStrength = .6
+    obstacleStrength = 2.4
     vector = [0, 0]
+    ''' change for multiple robots
     for r2 in Robots:
         distance = math.sqrt((robot.pose[0] - r2.pose[0]) ** 2 + (robot.pose[1] - r2.pose[1]) ** 2)
         strength = get_pf_magnitude_linear(distance)
@@ -155,18 +233,32 @@ def obstacle_force(robot):
                 robot.waitingOn = False
         # vector[0] += (robot.pose[0] - r2.pose[0]) * strength
         # vector[1] += (robot.pose[1] - r2.pose[1]) * strength
-
+    '''
     for obstacle in Obstacles:
         distance = math.sqrt((robot.pose[0] - obstacle[0]) ** 2 + (robot.pose[1] - obstacle[1]) ** 2)
         strength = get_pf_magnitude_linear(distance)
         #strength = get_pf_magnitude_constant(distance)
-        vector[0] += (robot.pose[0] - obstacle[0]) * strength*obstacleStrength
-        vector[1] += (robot.pose[1] - obstacle[1]) * strength*obstacleStrength
+        #vector[0] += (robot.pose[0] - obstacle[0]) * strength*obstacleStrength
+        #vector[1] += (robot.pose[1] - obstacle[1]) * strength*obstacleStrength
+        vector[1] += (robot.pose[0] - obstacle[0]) * strength*obstacleStrength
+        vector[0] += (robot.pose[1] - obstacle[1]) * strength*obstacleStrength
+    neg1 = 1
+    neg2 = 1
+    if(vector[1] < 0):
+        neg1 = -1
+    if(vector[0] < 0):
+        neg2 = -1
+    if((neg1 == -1 and neg2 ==-1) or (neg1 == 1 and neg2 ==-1)):
+        vector[0] *= -1
+    elif((neg1 == -1 and neg2 == 1) or (neg1 == 1 and neg2 ==1)):
+        vector[1] *= -1
+    #if((neg1 == -1 and neg2 == 1) and 5>
         #code below prevents running into obstacles directly ahead of bots
-        if(vector[0] == 0 and vector[1] != 0):
-            vector[0] = .3
-        elif(vector[1] == 0 and vector[0] != 0):
-            vector[1] = .3
+        #if(vector[0] == 0 and vector[1] != 0):
+        #    vector[0] = .3
+        #elif(vector[1] == 0 and vector[0] != 0):
+        #    vector[1] = .3
+        rospy.logerr("--------------------------------------------{0}------------------".format(strength))
     force_from_obstacles = vector
     return force_from_obstacles
 
@@ -216,7 +308,7 @@ def wrap_angle(angle):
 
 def get_pf_magnitude_linear(distance):
     # How close to the obstacle do we have to be to begin feeling repulsive force
-    distance_threshold = 2.0
+    distance_threshold = 1.3
     # The maximum strength of the repulsive force
     max_strength = 1
     if distance < distance_threshold:
@@ -236,11 +328,12 @@ def get_pf_magnitude_constant(distance):
 
 
 def potential():
-    rospy.init_node('MiniBots', anonymous=True)  # Initialize the ros node
-    sub_once = rospy.Subscriber('/obstacles', PointIndicesArray, obstacle_callback)
+    rospy.init_node('MiniBots', log_level=rospy.ERROR, anonymous=True)  # Initialize the ros node
+    #sub_once = rospy.Subscriber('/obstacles', PointIndicesArray, obstacle_callback)
     rospy.logerr("------------------------------------------------------waiting---------------------------------")
     rospy.wait_for_message('/obstacles', PointIndicesArray)
-    sub_once.unregister()
+    createMap()
+    #sub_once.unregister()
     global Robots, Pubs
 
     count = 0
@@ -253,11 +346,11 @@ def potential():
     #        count +=1
     #        topicName = x[0].split("/")
     #        Pubs.append(rospy.Publisher('/{}/cmd_vel'.format(topicName[1]), Twist, queue_size=10))
-    rate = rospy.Rate(5)  # 10 Hz
+    rate = rospy.Rate(3)  # 10 Hz
     rb = Robot()
     Robots.append(rb)
     rb.count = 1
-    rospy.Subscriber('/device01', Odometry, callback, callback_args=(rb,0))
+    rospy.Subscriber('/tf_pose', Odometry, callback, callback_args=(rb,0))
     Pubs.append(rospy.Publisher('/cmd_vel'.format(), Twist, queue_size=10))
     #Create our publisher to send drive commands to the robot
 
@@ -267,30 +360,30 @@ def potential():
         count = 0
         for robot in Robots:
             # 2. Compute obstacle avoidance force
-            o_force = obstacle_force(robot)
+            # o_force = obstacle_force(robot)
 
             # 1. Compute attractive force to goal
             g_force = goal_force(robot)
 
             # 3. Get total force by adding together
-            total_force = add_forces(g_force, o_force)
-
+            # total_force = add_forces(g_force, o_force)
+            # rospy.logerr("g: {0}| O: {1}| T: {2}".format(g_force, o_force, total_force)) 
             # 4. Get final drive command from total force
-            twist = drive_from_force(total_force, robot)
+            twist = drive_from_force(g_force, robot)
 
             # 5. Publish drive command, then sleep
             if(robot.wait):
                 twist = Twist()
-            motorForce(total_force, robot)
+            motorForce(g_force, robot)
             '''
-	    if(robot.turn != 0):
+        if(robot.turn != 0):
                 if(abs(robot.pose[2]) > (abs(robot.turn)-0.2) and abs(robot.pose[2]) < (abs(robot.turn)+0.2)):
                     robot.turn = 0
                     robot.state = (robot.state + 1) % stateCount
                     break
                 twist = Twist()
                 twist.angular.z = -.5
-	   
+       
 
             Pubs[count].publish(twist)
             count +=1
@@ -310,16 +403,16 @@ def motorForce(force, robot):
     
     force_mag = math.hypot(force[0], force[1])
     midSpeed = 100
-    minSpeed = 20
+    minSpeed = 10
     maxSpeed = 100
-    scalar = .5
-    baseSpeed = 95
+    scalar = .7
+    baseSpeed = 93
     combinedSpeed = midSpeed*force_mag
     speedDif = combinedSpeed*angle_diff*scalar
     left = baseSpeed+speedDif
     right = baseSpeed-speedDif
     
-    rospy.logerr("motorForce force_angle: {}, botAngle: {}, angle_diff: {}, speedDif: {}, left: {}, right: {}".format(force_angle, robot.pose[2], angle_diff, speedDif, left, right))
+    
 
     if(left > maxSpeed):
         left = maxSpeed
@@ -337,9 +430,11 @@ def motorForce(force, robot):
     if(robot.wait):
         left = 70
         right = 70
+    rospy.logerr("Wait ----------------------- Wait ----------------------- yo")
+    rospy.logerr("mo: {}, botA: {}, anglediff: {}, speedDif: {}, left: {}, right: {}".format(force_angle, robot.pose[2], angle_diff, speedDif, left, right))
     command = bytes([left, right])
     #rospy.logerr('---------L: {0}, R: {1}, yawErr: {2}, Mag {3}, a_d: {4}'.format(left,right, speedDif, force_mag, angle_diff))
-    s.send(command)
+    #s.send(command)
     #if (robot == Robots[1]):
      #   print(motorCommand)
         #bob = 2+1
@@ -355,3 +450,8 @@ if __name__ == '__main__':
         potential()
     except rospy.ROSInterruptException:
         pass
+
+# for y in range(height-1,-1,-1):
+#     for x in range(width):
+#         print("|{0}".format(costList[y][x]), end="")
+#     print("|\n", end="")
