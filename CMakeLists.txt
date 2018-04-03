@@ -10,7 +10,7 @@ set(CATKIN_DEVEL_PREFIX "$ENV{HOME}/catkin_ws/devel")
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 
-find_package(PCL 1.8 REQUIRED)
+find_package(PCL 1.7 REQUIRED)
 find_package(catkin REQUIRED COMPONENTS
   kinect2_bridge
 ##  pcl_ros
