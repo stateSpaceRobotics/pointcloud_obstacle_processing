@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(NASA_ARMS)
+project(pointcloud_obstacle_processing)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++11)
@@ -115,7 +115,7 @@ generate_messages(
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
   INCLUDE_DIRS minibot_cr18/include
-  LIBRARIES NASA_ARMS
+  LIBRARIES pointcloud_obstacle_processing
   CATKIN_DEPENDS kinect2_bridge roscpp rospy std_msgs message_runtime
   #DEPENDS system_lib
 )
@@ -213,11 +213,7 @@ include_directories(
 
 include_directories(include ${catkin_INCLUDE_DIRS})
 
-add_executable(obstacle_detection minibot_cr18/src/obstacle_detection.cpp)
-target_link_libraries(obstacle_detection ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+add_executable(pointcloud_obstacle_processing minibot_cr18/src/obstacle_detection.cpp)
+target_link_libraries(pointcloud_obstacle_processing ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
-add_executable(obstacle_processor minibot_cr18/src/obstacle_processor.cpp)
-target_link_libraries(obstacle_processor ${catkin_LIBRARIES})
 
-add_executable(frame_preprocessor minibot_cr18/src/frame_preprocessor.cpp)
-target_link_libraries(frame_preprocessor ${catkin_LIBRARIES} ${PCL_LIBRARIES})
