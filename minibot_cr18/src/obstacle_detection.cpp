@@ -612,7 +612,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     // ------------------ euclidian cluster extraction ------------------
     // time
     auto euc_start = std::chrono::high_resolution_clock::now();
-
+    
     // create data structures for euclidian cluster extraction.
     pcl::search::KdTree<pcl::PointXYZ>::Ptr euc_cluster_tree(new pcl::search::KdTree<pcl::PointXYZ>);
     euc_cluster_tree->setInputCloud(planar_cloud_y);
