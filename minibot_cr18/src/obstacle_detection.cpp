@@ -69,8 +69,13 @@ ros::Publisher centroid_publisher;
 ros::Publisher euc_cluster_publisher;
 ros::Publisher occupancy_grid_publisher;
 
-const char *point_topic = "/NASA_ARMS/obstacle_preprocessor/accumulated_depth_1";  // where are we getting the depth data from?
-//const char *point_topic = "/kinect2/sd/points";
+pcl::PointCloud<pcl::PointXYZ> passthrough_cloud; // for the accumulation
+
+//const char *point_topic = "/NASA_ARMS/obstacle_preprocessor/accumulated_depth_1";  // where are we getting the depth data from?
+const char *point_topic = "/kinect2/sd/points";
+
+int frames_to_accumulate;
+int current_frame_count;
 
 
 float block_size;
@@ -501,204 +506,233 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
 }
 
 
-void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
-{
+void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
   /* Called when a PointCloud is received from the Kinect.
    * Orchestrates the obstacle detection using a bunch of other functions.
    *
    */
   // time
-  auto init_start = std::chrono::high_resolution_clock::now();
+
   // Container for original and filtered data
-  pcl::PCLPointCloud2* initial_cloud = new pcl::PCLPointCloud2;
+  pcl::PCLPointCloud2 *initial_cloud = new pcl::PCLPointCloud2;
   pcl::PCLPointCloud2ConstPtr initial_cloud_ptr(initial_cloud);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr accumulator_input_cloud(new pcl::PointCloud<pcl::PointXYZ>);
 
   // Convert to PCLPointCloud2 data type from ROS sensor_msgs
   pcl_conversions::toPCL(*cloud_msg, *initial_cloud);
+  pcl::fromPCLPointCloud2(*initial_cloud, *accumulator_input_cloud);
 
-  pcl::PointCloud<pcl::PointXYZ>::Ptr passthrough_cloud (new pcl::PointCloud<pcl::PointXYZ>);  // for the occupancy grid
-  pcl::PointCloud<pcl::PointXYZ>::Ptr downsample_input_cloud (new pcl::PointCloud<pcl::PointXYZ>);  // for downsampling
+  if (current_frame_count < frames_to_accumulate) {
+    passthrough_cloud += *accumulator_input_cloud;
+    current_frame_count += 1;
+  } else {
 
-  pcl::PointCloud<pcl::PointXYZ>::Ptr statistical_outlier_input_cloud (new pcl::PointCloud<pcl::PointXYZ>);  // new point cloud to use in PCL
-  pcl::PointCloud<pcl::PointXYZ> statistical_outlier_output_cloud;
+    // TODO: Add output for final_cloud
 
-  pcl::fromPCLPointCloud2(*initial_cloud, *passthrough_cloud);  // convert PCLPointCloud2 to PointCloud<PointXYZ> for processing (annoying, but seemingly necessary)
-  // time
-  auto init_stop = std::chrono::high_resolution_clock::now();
-  // ^^^ THAT PART IS MASSIVELY SLOW (compared to everything except euclidean cluster extraction)
+    current_frame_count = 0;
 
-  // --------------------- passthrough filter, detect holes and build the occupancy grid data set-----
-  auto occ_start = std::chrono::high_resolution_clock::now();
-  char *occupancy_grid_data = new char[occupancy_grid_size];
+    auto init_start = std::chrono::high_resolution_clock::now();
+    //pcl::PointCloud<pcl::PointXYZ>::Ptr passthrough_cloud(
+    //        new pcl::PointCloud<pcl::PointXYZ>);  // for the occupancy grid
+    pcl::PointCloud<pcl::PointXYZ>::Ptr downsample_input_cloud(new pcl::PointCloud<pcl::PointXYZ>);  // for downsampling
 
-  build_initial_occupancy_grid_dataset(occupancy_grid_size, occupancy_grid_height, occupancy_grid_width, occupancy_grid_data, pt_lower_lim_x,
-                                       pt_upper_lim_x, pt_lower_lim_y, pt_upper_lim_y, pt_lower_lim_z, pt_upper_lim_z,
-                                       occupancy_grid_pt_counts, row_averages, *passthrough_cloud, *downsample_input_cloud);
-  // time
-  auto occ_stop = std::chrono::high_resolution_clock::now();
+    pcl::PointCloud<pcl::PointXYZ>::Ptr statistical_outlier_input_cloud(
+            new pcl::PointCloud<pcl::PointXYZ>);  // new point cloud to use in PCL
+    pcl::PointCloud<pcl::PointXYZ> statistical_outlier_output_cloud;
 
-  // TODO: should this be done before everything else?
-  // ---------------------- downsample using VoxelGrid --------------------------------
+    //pcl::fromPCLPointCloud2(*initial_cloud,
+    //                        *passthrough_cloud);  // convert PCLPointCloud2 to PointCloud<PointXYZ> for processing (annoying, but seemingly necessary)
+    // time
+    auto init_stop = std::chrono::high_resolution_clock::now();
+    // ^^^ THAT PART IS MASSIVELY SLOW (compared to everything except euclidean cluster extraction)
 
-  // time
-  auto downsample_start = std::chrono::high_resolution_clock::now();
-  downsample_cloud(downsample_input_cloud, *statistical_outlier_input_cloud, downsample_leaf_size, downsample_publisher, true);
+    // --------------------- passthrough filter, detect holes and build the occupancy grid data set-----
+    auto occ_start = std::chrono::high_resolution_clock::now();
+    char *occupancy_grid_data = new char[occupancy_grid_size];
 
-  // time
-  auto downsample_stop = std::chrono::high_resolution_clock::now();
+    build_initial_occupancy_grid_dataset(occupancy_grid_size, occupancy_grid_height, occupancy_grid_width,
+                                         occupancy_grid_data, pt_lower_lim_x,
+                                         pt_upper_lim_x, pt_lower_lim_y, pt_upper_lim_y, pt_lower_lim_z, pt_upper_lim_z,
+                                         occupancy_grid_pt_counts, row_averages, passthrough_cloud,
+                                         *downsample_input_cloud);
+    // time
+    auto occ_stop = std::chrono::high_resolution_clock::now();
 
-  // ------------------- statistical outlier removal ---------------------  // TODO: Determine if this is needed
+    // TODO: should this be done before everything else?
+    // ---------------------- downsample using VoxelGrid --------------------------------
 
-  // time
-  auto stat_out_rem_start = std::chrono::high_resolution_clock::now();
+    // time
+    auto downsample_start = std::chrono::high_resolution_clock::now();
+    downsample_cloud(downsample_input_cloud, *statistical_outlier_input_cloud, downsample_leaf_size,
+                     downsample_publisher, true);
 
-  remove_statistical_outliers(statistical_outlier_input_cloud, statistical_outlier_output_cloud,
-                              statistical_outlier_meanK, statistical_outlier_stdDevThres, statistical_outlier_publisher,
-                              true);
+    // time
+    auto downsample_stop = std::chrono::high_resolution_clock::now();
 
-  // time
-  auto stat_out_rem_stop = std::chrono::high_resolution_clock::now();
+    // ------------------- statistical outlier removal ---------------------  // TODO: Determine if this is needed
 
-  // ----------------- plane segmentation (floor removal) ----------------
+    // time
+    auto stat_out_rem_start = std::chrono::high_resolution_clock::now();
 
-  // time
-  auto plane_seg_start = std::chrono::high_resolution_clock::now();
+    remove_statistical_outliers(statistical_outlier_input_cloud, statistical_outlier_output_cloud,
+                                statistical_outlier_meanK, statistical_outlier_stdDevThres,
+                                statistical_outlier_publisher,
+                                true);
 
-  // Create the data structures necessary for segmenting the planes and extracting the indices remaining.
-  pcl::PointCloud<pcl::PointXYZ>::Ptr planar_cloud_y (statistical_outlier_output_cloud.makeShared());
-  pcl::ModelCoefficients::Ptr coefficients_y (new pcl::ModelCoefficients);
+    // time
+    auto stat_out_rem_stop = std::chrono::high_resolution_clock::now();
 
-  // TODO: Change for the transform
-  const Eigen::Matrix<float, 3, 1> &plane_axis_y = Eigen::Vector3f(0, 1, 0);  // x, y, z
+    // ----------------- plane segmentation (floor removal) ----------------
 
-  pcl::PointIndices::Ptr inliers_y (new pcl::PointIndices);
-  pcl::PointIndices::Ptr outliers_y (new pcl::PointIndices);
+    // time
+    auto plane_seg_start = std::chrono::high_resolution_clock::now();
 
-  pcl::PointCloud<pcl::PointXYZ>::Ptr indices_cloud_y (statistical_outlier_output_cloud.makeShared());
-  pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud_y (statistical_outlier_output_cloud.makeShared());
+    // Create the data structures necessary for segmenting the planes and extracting the indices remaining.
+    pcl::PointCloud<pcl::PointXYZ>::Ptr planar_cloud_y(statistical_outlier_output_cloud.makeShared());
+    pcl::ModelCoefficients::Ptr coefficients_y(new pcl::ModelCoefficients);
 
-  // perform the planar segmentation
-  segment_plane_and_extract_indices(planar_cloud_y, indices_cloud_y, filtered_cloud_y, coefficients_y, inliers_y,
-                                    outliers_y, plane_axis_y, plane_segment_dist_thres, plane_segment_angle,
-                                    planar_cloud_publisher, indices_cloud_publisher, filtered_cloud_publisher,
-                                    true, true, true);
+    // TODO: Change for the transform
+    const Eigen::Matrix<float, 3, 1> &plane_axis_y = Eigen::Vector3f(0, 1, 0);  // x, y, z
 
-  // time
-  auto plane_seg_stop = std::chrono::high_resolution_clock::now();
+    pcl::PointIndices::Ptr inliers_y(new pcl::PointIndices);
+    pcl::PointIndices::Ptr outliers_y(new pcl::PointIndices);
 
-  // ------------------ euclidian cluster extraction ------------------
-  // time
-  auto euc_start = std::chrono::high_resolution_clock::now();
-  /*
-  // create data structures for euclidian cluster extraction.
-  pcl::search::KdTree<pcl::PointXYZ>::Ptr euc_cluster_tree (new pcl::search::KdTree<pcl::PointXYZ>);
-  euc_cluster_tree->setInputCloud (planar_cloud_y);
-  std::vector<pcl::PointIndices> euc_cluster_indices;  // each entry is a vector of indices_cloud
+    pcl::PointCloud<pcl::PointXYZ>::Ptr indices_cloud_y(statistical_outlier_output_cloud.makeShared());
+    pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud_y(statistical_outlier_output_cloud.makeShared());
 
-  // extract the clusters of points that meet certain parameters in the point cloud
-  extract_euclidian_clusters(planar_cloud_y, euc_cluster_indices, euc_cluster_tolerance, euc_min_cluster_size,
-                             euc_max_cluster_size, euc_cluster_tree);
+    // perform the planar segmentation
+    segment_plane_and_extract_indices(planar_cloud_y, indices_cloud_y, filtered_cloud_y, coefficients_y, inliers_y,
+                                      outliers_y, plane_axis_y, plane_segment_dist_thres, plane_segment_angle,
+                                      planar_cloud_publisher, indices_cloud_publisher, filtered_cloud_publisher,
+                                      true, true, true);
 
-  */
-  // time
-  auto euc_stop = std::chrono::high_resolution_clock::now();
-  // ---------------------- cluster cloud creation ------------------------
+    // time
+    auto plane_seg_stop = std::chrono::high_resolution_clock::now();
 
-  // time
-  auto cluster_start = std::chrono::high_resolution_clock::now();
-  /*
-  // create a Point Cloud containing the points of of the clusters (just the outline points)
-  pcl::PointCloud<pcl::PointXYZ>::Ptr clustered_cloud (new pcl::PointCloud<pcl::PointXYZ>);
-  sensor_msgs::PointCloud2::Ptr clusters (new sensor_msgs::PointCloud2);
-  NASA_ARMS::PointIndicesArray centroids;
-  int cluster_count;  // how many clusters detected?
+    // ------------------ euclidian cluster extraction ------------------
+    // time
+    auto euc_start = std::chrono::high_resolution_clock::now();
 
-  create_cluster_cloud(planar_cloud_y, euc_cluster_indices, clustered_cloud, cluster_count, centroids);
-  */
+    // create data structures for euclidian cluster extraction.
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr euc_cluster_tree(new pcl::search::KdTree<pcl::PointXYZ>);
+    euc_cluster_tree->setInputCloud(planar_cloud_y);
+    std::vector<pcl::PointIndices> euc_cluster_indices;  // each entry is a vector of indices_cloud
 
-  for (int i = 0; i < planar_cloud_y->points.size(); i++)
-  {
-    // safety first!
-    if(pcl_isnan(planar_cloud_y->points[i].x)) {
-      continue;
+    // extract the clusters of points that meet certain parameters in the point cloud
+    extract_euclidian_clusters(planar_cloud_y, euc_cluster_indices, euc_cluster_tolerance, euc_min_cluster_size,
+                               euc_max_cluster_size, euc_cluster_tree);
+
+
+    // time
+    auto euc_stop = std::chrono::high_resolution_clock::now();
+    // ---------------------- cluster cloud creation ------------------------
+
+    // time
+    auto cluster_start = std::chrono::high_resolution_clock::now();
+
+    // create a Point Cloud containing the points of of the clusters (just the outline points)
+    pcl::PointCloud<pcl::PointXYZ>::Ptr clustered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    sensor_msgs::PointCloud2::Ptr clusters(new sensor_msgs::PointCloud2);
+    NASA_ARMS::PointIndicesArray centroids;
+    int cluster_count;  // how many clusters detected?
+
+    create_cluster_cloud(planar_cloud_y, euc_cluster_indices, clustered_cloud, cluster_count, centroids);
+
+
+    for (int i = 0; i < planar_cloud_y->points.size(); i++) {
+      // safety first!
+      if (pcl_isnan(planar_cloud_y->points[i].x)) {
+        continue;
+      }
+      // get the index of the point
+      int index = get_occupancy_grid_location(planar_cloud_y->points[i].x, planar_cloud_y->points[i].z, pt_lower_lim_x,
+                                              pt_upper_lim_z, block_size, occupancy_grid_width, occupancy_grid_height);
+      occupancy_grid_data[index] = 100; // mark it as a bad thing.
     }
-    // get the index of the point
-    int index = get_occupancy_grid_location(planar_cloud_y->points[i].x, planar_cloud_y->points[i].z, pt_lower_lim_x,
-                                            pt_upper_lim_z, block_size, occupancy_grid_width, occupancy_grid_height);
-    occupancy_grid_data[index] = 100; // mark it as a bad thing.
+
+    nav_msgs::OccupancyGrid *occupancyGrid = new nav_msgs::OccupancyGrid();
+    occupancyGrid->info.resolution = block_size;
+    occupancyGrid->info.width = occupancy_grid_width;
+    occupancyGrid->info.height = occupancy_grid_height;
+    occupancyGrid->data = std::vector<int8_t>(occupancy_grid_data, occupancy_grid_data + occupancy_grid_size);
+    occupancyGrid->header.frame_id = "/kinect2_link";
+
+    occupancy_grid_publisher.publish(*occupancyGrid);
+
+    //time
+    auto cluster_stop = std::chrono::high_resolution_clock::now();
+
+    /*
+    // -------- Publish results --------------
+    centroid_publisher.publish(centroids);
+
+    pcl::toROSMsg(*clustered_cloud, *clusters);
+
+    clusters->header.frame_id = "/kinect2_link";
+    clusters->header.stamp = ros::Time::now();
+
+    euc_cluster_publisher.publish(clusters);
+
+    std::cout << " ----------- " << std::endl;
+    std::cout << "clusters found: " << cluster_count << " combined size: " << centroids.points.size() << std::endl;
+    */
+
+    // TIME CALCS
+    std::chrono::duration<double> init_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(
+            init_stop - init_start);
+    //std::chrono::duration<double> passthrough_time_taken = std::chrono::duration_cast<std::chrono::duration<double>> (passthrough_stop - passthrough_start);
+    std::chrono::duration<double> occ_grid_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(
+            occ_stop - occ_start);
+    std::chrono::duration<double> occ_grid_loop_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(
+            occ_grid_loop_stop - occ_grid_loop_start);
+    std::chrono::duration<double> downsample_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(
+            downsample_stop - downsample_start);
+    std::chrono::duration<double> stat_out_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(
+            stat_out_rem_stop - stat_out_rem_start);
+    std::chrono::duration<double> plane_seg_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(
+            plane_seg_stop - plane_seg_start);
+    std::chrono::duration<double> euc_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(
+            euc_stop - euc_start);
+    std::chrono::duration<double> cluster_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(
+            cluster_stop - cluster_start);
+
+    auto init_time_elapsed = (float) init_time_taken.count();
+    //auto passthrough_time_elapsed = (float) passthrough_time_taken.count();
+    auto occ_elapsed_time = (float) occ_grid_time_taken.count();
+    auto occ_grid_loop_elapsed_time = (float) occ_grid_loop_time_taken.count();
+    auto downsample_elapsed_time = (float) downsample_time_taken.count();
+    auto stat_out_rem_elapsed_time = (float) stat_out_time_taken.count();
+    auto plane_seg_elapsed_time = (float) plane_seg_time_taken.count();
+    auto euc_cluster_elapsed_time = (float) euc_time_taken.count();
+    auto cluster_elapsed_time = (float) cluster_time_taken.count();
+    auto total_time = init_time_elapsed + occ_elapsed_time + downsample_elapsed_time + stat_out_rem_elapsed_time
+                      + plane_seg_elapsed_time + euc_cluster_elapsed_time + cluster_elapsed_time;
+
+    auto init_percent = (float) ((init_time_elapsed / total_time) * 100);
+    //auto passthrough_percent = (float)((passthrough_time_elapsed / total_time)*100);
+    auto occ_percent = (float) ((occ_elapsed_time / total_time) * 100);
+    auto occ_grid_loop_percent = (float) ((occ_grid_loop_elapsed_time / occ_elapsed_time) * 100);
+    auto downsample_percent = (float) ((downsample_elapsed_time / total_time) * 100);
+    auto stat_out_rem_percent = (float) ((stat_out_rem_elapsed_time / total_time) * 100);
+    auto plane_seg_percent = (float) ((plane_seg_elapsed_time / total_time) * 100);
+    auto euc_cluster_percent = (float) ((euc_cluster_elapsed_time / total_time) * 100);
+    auto cluster_percent = (float) ((cluster_elapsed_time / total_time) * 100);
+
+    ROS_ERROR("---------Time summaries:-------------------");
+    ROS_ERROR("-------------------TOTAL TIME: %f seconds", total_time);
+    ROS_ERROR("----------initial conversions: %f seconds (%f) percent", init_time_elapsed, init_percent);
+    //ROS_ERROR("--------passthrough filtering: %f seconds (%f) percent", passthrough_time_elapsed, passthrough_percent);
+    ROS_ERROR("------occupancy grid creation: %f seconds (%f) percent", occ_elapsed_time, occ_percent);
+    //ROS_ERROR("......iteration through cloud: %f seconds (%f) percent (of parent)", occ_grid_loop_elapsed_time, occ_grid_loop_percent);
+    ROS_ERROR("-----------------downsampling: %f seconds (%f) percent", downsample_elapsed_time, downsample_percent);
+    ROS_ERROR("--statistical outlier removal: %f seconds (%f) percent", stat_out_rem_elapsed_time,
+              stat_out_rem_percent);
+    ROS_ERROR("-----------plane segmentation: %f seconds (%f) percent", plane_seg_elapsed_time, plane_seg_percent);
+    ROS_ERROR("---------euclidian clustering: %f seconds (%f) percent", euc_cluster_elapsed_time, euc_cluster_percent);
+    ROS_ERROR("-------cluster cloud creation: %f seconds (%f) percent", cluster_elapsed_time, cluster_percent);
+    ROS_ERROR("-------------------------------------------");
+    passthrough_cloud.clear();
   }
-
-  nav_msgs::OccupancyGrid *occupancyGrid = new nav_msgs::OccupancyGrid();
-  occupancyGrid->info.resolution = block_size;
-  occupancyGrid->info.width = occupancy_grid_width;
-  occupancyGrid->info.height = occupancy_grid_height;
-  occupancyGrid->data = std::vector<int8_t>(occupancy_grid_data, occupancy_grid_data + occupancy_grid_size);
-
-  occupancy_grid_publisher.publish(*occupancyGrid);
-
-  //time
-  auto cluster_stop = std::chrono::high_resolution_clock::now();
-
-  /*
-  // -------- Publish results --------------
-  centroid_publisher.publish(centroids);
-
-  pcl::toROSMsg(*clustered_cloud, *clusters);
-
-  clusters->header.frame_id = "/kinect2_link";
-  clusters->header.stamp = ros::Time::now();
-
-  euc_cluster_publisher.publish(clusters);
-
-  std::cout << " ----------- " << std::endl;
-  std::cout << "clusters found: " << cluster_count << " combined size: " << centroids.points.size() << std::endl;
-  */
-
-  // TIME CALCS
-  std::chrono::duration<double> init_time_taken = std::chrono::duration_cast<std::chrono::duration<double>> (init_stop - init_start);
-  //std::chrono::duration<double> passthrough_time_taken = std::chrono::duration_cast<std::chrono::duration<double>> (passthrough_stop - passthrough_start);
-  std::chrono::duration<double> occ_grid_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(occ_stop - occ_start);
-  std::chrono::duration<double> occ_grid_loop_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(occ_grid_loop_stop - occ_grid_loop_start);
-  std::chrono::duration<double> downsample_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(downsample_stop - downsample_start);
-  std::chrono::duration<double> stat_out_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(stat_out_rem_stop - stat_out_rem_start);
-  std::chrono::duration<double> plane_seg_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(plane_seg_stop - plane_seg_start);
-  std::chrono::duration<double> euc_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(euc_stop - euc_start);
-  std::chrono::duration<double> cluster_time_taken = std::chrono::duration_cast<std::chrono::duration<double>>(cluster_stop - cluster_start);
-
-  auto init_time_elapsed = (float) init_time_taken.count();
-  //auto passthrough_time_elapsed = (float) passthrough_time_taken.count();
-  auto occ_elapsed_time = (float)occ_grid_time_taken.count();
-  auto occ_grid_loop_elapsed_time = (float) occ_grid_loop_time_taken.count();
-  auto downsample_elapsed_time = (float)downsample_time_taken.count();
-  auto stat_out_rem_elapsed_time = (float)stat_out_time_taken.count();
-  auto plane_seg_elapsed_time = (float)plane_seg_time_taken.count();
-  auto euc_cluster_elapsed_time = (float) euc_time_taken.count();
-  auto cluster_elapsed_time = (float) cluster_time_taken.count();
-  auto total_time = init_time_elapsed + occ_elapsed_time + downsample_elapsed_time + stat_out_rem_elapsed_time
-                    + plane_seg_elapsed_time + euc_cluster_elapsed_time + cluster_elapsed_time;
-
-  auto init_percent = (float)((init_time_elapsed / total_time) * 100);
-  //auto passthrough_percent = (float)((passthrough_time_elapsed / total_time)*100);
-  auto occ_percent = (float)((occ_elapsed_time / total_time) * 100);
-  auto occ_grid_loop_percent = (float)((occ_grid_loop_elapsed_time / occ_elapsed_time) * 100);
-  auto downsample_percent = (float)((downsample_elapsed_time / total_time) * 100);
-  auto stat_out_rem_percent = (float)((stat_out_rem_elapsed_time/ total_time) * 100);
-  auto plane_seg_percent = (float)((plane_seg_elapsed_time/ total_time) * 100);
-  auto euc_cluster_percent = (float)((euc_cluster_elapsed_time/ total_time) * 100);
-  auto cluster_percent = (float)((cluster_elapsed_time/ total_time) * 100);
-
-  ROS_ERROR("---------Time summaries:-------------------");
-  ROS_ERROR("-------------------TOTAL TIME: %f seconds", total_time);
-  ROS_ERROR("----------initial conversions: %f seconds (%f) percent", init_time_elapsed, init_percent);
-  //ROS_ERROR("--------passthrough filtering: %f seconds (%f) percent", passthrough_time_elapsed, passthrough_percent);
-  ROS_ERROR("------occupancy grid creation: %f seconds (%f) percent", occ_elapsed_time, occ_percent);
-  ROS_ERROR("......iteration through cloud: %f seconds (%f) percent (of parent)", occ_grid_loop_elapsed_time, occ_grid_loop_percent);
-  ROS_ERROR("-----------------downsampling: %f seconds (%f) percent", downsample_elapsed_time, downsample_percent);
-  ROS_ERROR("--statistical outlier removal: %f seconds (%f) percent", stat_out_rem_elapsed_time, stat_out_rem_percent);
-  ROS_ERROR("-----------plane segmentation: %f seconds (%f) percent", plane_seg_elapsed_time, plane_seg_percent);
-  ROS_ERROR("---------euclidian clustering: %f seconds (%f) percent", euc_cluster_elapsed_time, euc_cluster_percent);
-  ROS_ERROR("-------cluster cloud creation: %f seconds (%f) percent", cluster_elapsed_time, cluster_percent);
-  ROS_ERROR("-------------------------------------------");
 }
 
 int main (int argc, char** argv)
@@ -707,6 +741,9 @@ int main (int argc, char** argv)
   ros::init (argc, argv, "obstacle_detection");
   ros::NodeHandle nh ("~");
   ros::NodeHandle nh_pub;
+
+  nh.param("accumulate_count", frames_to_accumulate, 2);
+  current_frame_count = 0;
 
   nh.param("downsample_input_data", downsample_input_data, true);  // make the dataset smaller (and faster to process)
   nh.param("passthrough_filter_enable", passthrough_filter_enable, true);  // do we wanna cut things out? (useful for trimming the points down to the dimensions of the field)

@@ -19,7 +19,7 @@ int frames_to_accumulate;
 int current_frame_count;
 int count;
 
-const char *point_topic = "/kinect2/qhd/points";
+const char *point_topic = "/kinect2/sd/points";
 
 pcl::PointCloud<pcl::PointXYZ> final_cloud;  // TODO: Should really pre-allocate enough memory initially for performance
 
