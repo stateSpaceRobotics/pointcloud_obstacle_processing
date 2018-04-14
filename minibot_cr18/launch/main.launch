@@ -1,17 +1,18 @@
 <launch>
         <rosparam command="load" file="$(find pointcloud_obstacle_processing)/minibot_cr18/params.yaml"/>
-                <!-- <include file="$(find kinect2_bridge)/launch/kinect2_bridge.launch">
+                <include file="$(find kinect2_bridge)/launch/kinect2_bridge.launch">
 	        	<arg name="publish_tf" value="true" />
                         <arg name="fps_limit" value="-1" />
                         <arg name="depth_method" value="opengl" />
                         <arg name="reg_device" value="1" />
                         <arg name="depth_device" value="1" />
                         <arg name="worker_threads" value="2" />
-	        </include> -->
+	        </include>
         <group ns="pointcloud_obstacle_processing">
+	        <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="static_tf_broadcaster" args="0 0 0.83 -0.5 0.5 -0.5 0.5 world kinect2_link" /> -->
 	        <!-- <node name="lighthouse_ros" pkg="NASA_ARMS" type="steam_runtime.sh"/> -->
 	        <node pkg="pointcloud_obstacle_processing" name="obstacle_detection" type="pointcloud_obstacle_detection" output="screen"/>
-	        <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="static_tf_broadcaster" args="0 0.935 0 0 0.707 0.707 0 world kinect2_link" /> -->
+
 	    </group>
 </launch>
 

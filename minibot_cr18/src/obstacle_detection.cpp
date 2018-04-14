@@ -123,7 +123,7 @@ geometry_msgs::TransformStamped transformStamped;
 
 
 // TODO: Document
-int get_occupancy_grid_location(float x, float z, float x_min, float z_max, float block_size, int occupancy_grid_width, int occupancy_grid_height)
+int get_occupancy_grid_location(float x, float y, float x_min, float y_max, float block_size, int occupancy_grid_width)
 {
   int x_count = 0;
   int y_count = 0;
@@ -133,7 +133,7 @@ int get_occupancy_grid_location(float x, float z, float x_min, float z_max, floa
     x_count++;
   }
 
-  while (z_max - (y_count + 1)*block_size > z)
+  while (y_max - (y_count + 1)*block_size > y)
   {
     y_count++;
   }
@@ -184,8 +184,8 @@ void build_initial_occupancy_grid_dataset(int grid_size, int grid_height, int gr
       continue;  // don't count NaN points or out of bounds points.
     }
 
-    int index = get_occupancy_grid_location(input_cloud.points[i].x, input_cloud.points[i].z, x_min, z_max,
-                                            block_size, grid_width, grid_height);
+    int index = get_occupancy_grid_location(input_cloud.points[i].y, input_cloud.points[i].x, y_min, x_max,
+                                            block_size, grid_width);
     if (index >= occupancy_grid_size) {
       ROS_ERROR("OUT OF BOUNDS INDEX ACCESS");
 
@@ -547,7 +547,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     // TODO: Add output for final_cloud
     auto init_start = std::chrono::high_resolution_clock::now();
 
-    transformStamped = tfBuffer.lookupTransform("kinect2_link", "world", ros::Time(0));
+    transformStamped = tfBuffer.lookupTransform("world", "kinect2_link", ros::Time(0));
     tf::StampedTransform new_tf;
     tf::transformStampedMsgToTF(transformStamped, new_tf);
     pcl::PointCloud<pcl::PointXYZ> passthrough_cloud;
@@ -582,6 +582,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     // time
     auto occ_stop = std::chrono::high_resolution_clock::now();
     // TODO: should this be done before everything else?
+    ROS_ERROR("after passthrough point cloud size: %d", downsample_input_cloud->points.size());
     // ---------------------- downsample using VoxelGrid --------------------------------
 
     // time
@@ -593,7 +594,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     auto downsample_stop = std::chrono::high_resolution_clock::now();
 
     // ------------------- statistical outlier removal ---------------------  // TODO: Determine if this is needed
-
+    ROS_ERROR("after downsampling point cloud size: %d", statistical_outlier_input_cloud->points.size());
     // time
     auto stat_out_rem_start = std::chrono::high_resolution_clock::now();
 
@@ -615,7 +616,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     pcl::ModelCoefficients::Ptr coefficients_y(new pcl::ModelCoefficients);
 
     // TODO: Change for the transform
-    const Eigen::Matrix<float, 3, 1> &plane_axis_y = Eigen::Vector3f(0, 1, 0);  // x, y, z
+    const Eigen::Matrix<float, 3, 1> &plane_axis_y = Eigen::Vector3f(0, 0, 1);  // x, y, z
 
     pcl::PointIndices::Ptr inliers_y(new pcl::PointIndices);
     pcl::PointIndices::Ptr outliers_y(new pcl::PointIndices);
@@ -635,7 +636,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     // ------------------ euclidean cluster extraction ------------------
     // time
     auto euc_start = std::chrono::high_resolution_clock::now();
-    
+    /*
     // create data structures for euclidian cluster extraction.
     pcl::search::KdTree<pcl::PointXYZ>::Ptr euc_cluster_tree(new pcl::search::KdTree<pcl::PointXYZ>);
     euc_cluster_tree->setInputCloud(planar_cloud_y);
@@ -645,7 +646,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     extract_euclidian_clusters(planar_cloud_y, euc_cluster_indices, euc_cluster_tolerance, euc_min_cluster_size,
                                euc_max_cluster_size, euc_cluster_tree);
 
-
+    */
     // time
     auto euc_stop = std::chrono::high_resolution_clock::now();
     // ---------------------- cluster cloud creation ------------------------
@@ -668,8 +669,8 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
         continue;
       }
       // get the index of the point
-      int index = get_occupancy_grid_location(planar_cloud_y->points[i].x, planar_cloud_y->points[i].z, pt_lower_lim_x,
-                                              pt_upper_lim_z, block_size, occupancy_grid_width, occupancy_grid_height);
+      int index = get_occupancy_grid_location(planar_cloud_y->points[i].y, planar_cloud_y->points[i].x, pt_lower_lim_y,
+                                              pt_upper_lim_x, block_size, occupancy_grid_width);
       occupancy_grid_data[index] = 100; // mark it as a bad thing.
     }
 
@@ -679,6 +680,13 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     occupancyGrid->info.height = occupancy_grid_height;
     occupancyGrid->data = std::vector<int8_t>(occupancy_grid_data, occupancy_grid_data + occupancy_grid_size);
     occupancyGrid->header.frame_id = "world";
+    occupancyGrid->info.origin.orientation.w = 0.707;
+    occupancyGrid->info.origin.orientation.z = 0.707;
+    occupancyGrid->info.origin.orientation.y = 0;
+    occupancyGrid->info.origin.orientation.x = 0;
+    occupancyGrid->info.origin.position.x = pt_upper_lim_x;
+    occupancyGrid->info.origin.position.y = 0;
+    occupancyGrid->info.origin.position.z = 0;
 
     occupancy_grid_publisher.publish(*occupancyGrid);
 
@@ -784,8 +792,8 @@ int main (int argc, char** argv)
   nh.param("block_size", block_size, (float) 0.15);
   nh.param("dev_percent", dev_percent, (float) 0.5);
 
-  occupancy_grid_width = (int)ceil((fabs(pt_lower_lim_x) + fabs(pt_upper_lim_x)) / block_size);
-  occupancy_grid_height = (int)ceil((fabs(pt_upper_lim_z) + fabs(pt_lower_lim_z)) / block_size);
+  occupancy_grid_width = (int)ceil((fabs(pt_lower_lim_y) + fabs(pt_upper_lim_y)) / block_size);
+  occupancy_grid_height = (int)ceil((fabs(pt_lower_lim_x) + fabs(pt_upper_lim_x)) / block_size);
   occupancy_grid_size = occupancy_grid_width * occupancy_grid_height;
   occupancy_grid_pt_counts = new long long[occupancy_grid_size];
   row_averages = new long long[occupancy_grid_height];

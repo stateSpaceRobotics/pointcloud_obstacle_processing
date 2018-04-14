@@ -1,14 +1,14 @@
 pointcloud_obstacle_processing:
-        x_min: -1.0
-        x_max: 1.0
+        x_min: 0.0
+        x_max: 7.5
         y_min: 0.0
-        y_max: 3.0
-        z_min: -10.0
-        z_max: 10
+        y_max: 3.5
+        z_min: -0.25
+        z_max: 0.5
 
         obstacle_detection:
                 accumulate_count: 4
-                block_size: 0.1
+                block_size: 0.0375
                 dev_percent: 0.9
 
                 downsame_input_data: true
@@ -17,7 +17,7 @@ pointcloud_obstacle_processing:
                 passthrough_filter_enable: true
 
                 statistical_outlier_meanK: 15
-                statistical_outlier_stdDevThres: 1.0
+                statistical_outlier_stdDevThres: 2.0
 
                 plane_segment_dist_thres: 0.040
                 plane_segment_angle: 20
