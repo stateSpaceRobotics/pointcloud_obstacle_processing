@@ -1,16 +1,14 @@
-NASA_ARMS:
+pointcloud_obstacle_processing:
         x_min: -1.0
-        x_max: 0.9
-        y_min: -1.0
-        y_max: 1.0
-        z_min: 1.0
-        z_max: 4.5
+        x_max: 1.0
+        y_min: 0.0
+        y_max: 3.0
+        z_min: -10.0
+        z_max: 10
 
-        obstacle_preprocessor:
+        obstacle_detection:
                 accumulate_count: 4
-
-        obstacle_processor:
-                block_size: 0.0375
+                block_size: 0.1
                 dev_percent: 0.9
 
                 downsame_input_data: true

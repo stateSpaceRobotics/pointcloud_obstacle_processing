@@ -10,10 +10,10 @@ set(CATKIN_DEVEL_PREFIX "$ENV{HOME}/catkin_ws/devel")
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 
-find_package(PCL 1.7 REQUIRED)
+find_package(PCL REQUIRED)
 find_package(catkin REQUIRED COMPONENTS
-  kinect2_bridge
-##  pcl_ros
+##  kinect2_bridge
+  pcl_ros
   sensor_msgs
   roscpp
   rospy
@@ -116,7 +116,7 @@ generate_messages(
 catkin_package(
   INCLUDE_DIRS minibot_cr18/include
   LIBRARIES pointcloud_obstacle_processing
-  CATKIN_DEPENDS kinect2_bridge roscpp rospy std_msgs message_runtime
+  CATKIN_DEPENDS roscpp rospy std_msgs message_runtime
   #DEPENDS system_lib
 )
 
@@ -213,7 +213,7 @@ include_directories(
 
 include_directories(include ${catkin_INCLUDE_DIRS})
 
-add_executable(pointcloud_obstacle_processing minibot_cr18/src/obstacle_detection.cpp)
-target_link_libraries(pointcloud_obstacle_processing ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+add_executable(pointcloud_obstacle_detection minibot_cr18/src/obstacle_detection.cpp)
+target_link_libraries(pointcloud_obstacle_detection ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
 

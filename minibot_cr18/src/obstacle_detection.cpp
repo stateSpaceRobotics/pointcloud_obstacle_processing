@@ -33,7 +33,7 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/common/transforms.h>
-#include <NASA_ARMS/PointIndicesArray.h>
+#include <pointcloud_obstacle_processing/PointIndicesArray.h>
 #include <math.h>
 
 // includes for planar_segmentation
@@ -58,6 +58,12 @@
 // Occupancy Grid
 #include <nav_msgs/OccupancyGrid.h>
 
+// for transforms
+#include <tf2_ros/transform_listener.h>
+#include <geometry_msgs/TransformStamped.h>
+
+#include <pcl_ros/transforms.h>
+#include <tf/transform_datatypes.h>
 
 // very bad, no good global variables init
 ros::Publisher downsample_publisher;
@@ -69,9 +75,8 @@ ros::Publisher centroid_publisher;
 ros::Publisher euc_cluster_publisher;
 ros::Publisher occupancy_grid_publisher;
 
-pcl::PointCloud<pcl::PointXYZ> passthrough_cloud; // for the accumulation
+pcl::PointCloud<pcl::PointXYZ> tf_input_cloud; // for the accumulation
 
-//const char *point_topic = "/NASA_ARMS/obstacle_preprocessor/accumulated_depth_1";  // where are we getting the depth data from?
 const char *point_topic = "/kinect2/sd/points";
 
 int frames_to_accumulate;
@@ -113,6 +118,10 @@ std::chrono::high_resolution_clock::time_point occ_grid_loop_start;
 std::chrono::high_resolution_clock::time_point occ_grid_loop_stop;
 
 
+tf2_ros::Buffer tfBuffer;
+geometry_msgs::TransformStamped transformStamped;
+
+
 // TODO: Document
 int get_occupancy_grid_location(float x, float z, float x_min, float z_max, float block_size, int occupancy_grid_width, int occupancy_grid_height)
 {
@@ -128,7 +137,7 @@ int get_occupancy_grid_location(float x, float z, float x_min, float z_max, floa
   {
     y_count++;
   }
-  //int result = y_count*occupancy_grid_width + x_count;
+
   return y_count*occupancy_grid_width + x_count;
 
 
@@ -170,13 +179,21 @@ void build_initial_occupancy_grid_dataset(int grid_size, int grid_height, int gr
   for(int i = 0; i < static_cast<int> (input_cloud.points.size()); ++i)  // iterate through all points and place them in an occupancy grid
   {
     if (pcl_isnan(input_cloud.points[i].x) || input_cloud.points[i].x < x_min || input_cloud.points[i].x > x_max
-        || input_cloud.points[i].z < z_min || input_cloud.points[i].z > z_max || input_cloud.points[i].y < y_min || input_cloud.points[i].y > y_max){
+        || input_cloud.points[i].z < z_min || input_cloud.points[i].z > z_max || input_cloud.points[i].y < y_min ||
+        input_cloud.points[i].y > y_max) {
       continue;  // don't count NaN points or out of bounds points.
     }
 
-    point_count_array[get_occupancy_grid_location(input_cloud.points[i].x, input_cloud.points[i].z, x_min, z_max,
-                                                  block_size, grid_width, grid_height)]++;  // determine location in grid for point
-    point_count++;
+    int index = get_occupancy_grid_location(input_cloud.points[i].x, input_cloud.points[i].z, x_min, z_max,
+                                            block_size, grid_width, grid_height);
+    if (index >= occupancy_grid_size) {
+      ROS_ERROR("OUT OF BOUNDS INDEX ACCESS");
+
+    } else {
+
+      point_count_array[index]++;  // determine location in grid for point
+      point_count++;
+    }
 
     output_cloud.push_back(input_cloud.points[i]);
   }
@@ -256,7 +273,7 @@ void downsample_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud, pc
     {
       sensor_msgs::PointCloud2 publish_cloud;
       pcl::toROSMsg(output_cloud, publish_cloud);
-      publish_cloud.header.frame_id = "/kinect2_link";
+      publish_cloud.header.frame_id = "world";
       publish_cloud.header.stamp = ros::Time::now();
       pub.publish(publish_cloud);
     }
@@ -300,7 +317,7 @@ void remove_statistical_outliers(pcl::PointCloud<pcl::PointXYZ>::Ptr& input_clou
   {
     sensor_msgs::PointCloud2 publish_cloud;
     pcl::toROSMsg(output_cloud, publish_cloud);
-    publish_cloud.header.frame_id = "/kinect2_link";
+    publish_cloud.header.frame_id = "world";
     publish_cloud.header.stamp = ros::Time::now();
     pub.publish(publish_cloud);
   }
@@ -369,7 +386,7 @@ void segment_plane_and_extract_indices(pcl::PointCloud<pcl::PointXYZ>::Ptr& plan
   {
     sensor_msgs::PointCloud2 publish_cloud1;
     pcl::toROSMsg(*planar_cloud, publish_cloud1);
-    publish_cloud1.header.frame_id = "/kinect2_link";
+    publish_cloud1.header.frame_id = "world";
     publish_cloud1.header.stamp = ros::Time::now();
     pub1.publish(publish_cloud1);
   }
@@ -378,7 +395,7 @@ void segment_plane_and_extract_indices(pcl::PointCloud<pcl::PointXYZ>::Ptr& plan
   {
     sensor_msgs::PointCloud2 publish_cloud2;
     pcl::toROSMsg(*indices_cloud, publish_cloud2);
-    publish_cloud2.header.frame_id = "/kinect2_link";
+    publish_cloud2.header.frame_id = "world";
     publish_cloud2.header.stamp = ros::Time::now();
     pub2.publish(publish_cloud2);
   }
@@ -387,7 +404,7 @@ void segment_plane_and_extract_indices(pcl::PointCloud<pcl::PointXYZ>::Ptr& plan
   {
     sensor_msgs::PointCloud2 publish_cloud3;
     pcl::toROSMsg(*cloud_f, publish_cloud3);
-    publish_cloud3.header.frame_id = "/kinect2_link";
+    publish_cloud3.header.frame_id = "world";
     publish_cloud3.header.stamp = ros::Time::now();
     pub3.publish(publish_cloud3);
   }
@@ -433,7 +450,7 @@ float calculate_distance(float x1, float x2, float y1, float y2, float z1, float
 void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud,
                           std::vector<pcl::PointIndices> &cluster_indices,
                           pcl::PointCloud<pcl::PointXYZ>::Ptr &output_cloud, int &cluster_count,
-                          NASA_ARMS::PointIndicesArray &centroids)
+                          pointcloud_obstacle_processing::PointIndicesArray &centroids)
 {
   /* Works with the extract_euclidian_clusters function to create a point cloud of the outlines of the euclidian cluster
    * points. The convex (or concave) hull part creates a polygon from the points and that's what's added to the point
@@ -469,7 +486,7 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
       point_count += 1;
     }
 
-    NASA_ARMS::PointWithRad point;
+    pointcloud_obstacle_processing::PointWithRad point;
     point.x = x_sum/point_count;
     point.y = y_sum/point_count;
     point.z = z_sum/point_count;
@@ -523,15 +540,22 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
   pcl::fromPCLPointCloud2(*initial_cloud, *accumulator_input_cloud);
 
   if (current_frame_count < frames_to_accumulate) {
-    passthrough_cloud += *accumulator_input_cloud;
+    tf_input_cloud += *accumulator_input_cloud;
     current_frame_count += 1;
   } else {
 
     // TODO: Add output for final_cloud
+    auto init_start = std::chrono::high_resolution_clock::now();
+
+    transformStamped = tfBuffer.lookupTransform("kinect2_link", "world", ros::Time(0));
+    tf::StampedTransform new_tf;
+    tf::transformStampedMsgToTF(transformStamped, new_tf);
+    pcl::PointCloud<pcl::PointXYZ> passthrough_cloud;
+    pcl_ros::transformPointCloud(tf_input_cloud, passthrough_cloud, new_tf);
+
+    ROS_ERROR("point cloud size: %d", passthrough_cloud.points.size());
 
     current_frame_count = 0;
-
-    auto init_start = std::chrono::high_resolution_clock::now();
     //pcl::PointCloud<pcl::PointXYZ>::Ptr passthrough_cloud(
     //        new pcl::PointCloud<pcl::PointXYZ>);  // for the occupancy grid
     pcl::PointCloud<pcl::PointXYZ>::Ptr downsample_input_cloud(new pcl::PointCloud<pcl::PointXYZ>);  // for downsampling
@@ -557,7 +581,6 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
                                          *downsample_input_cloud);
     // time
     auto occ_stop = std::chrono::high_resolution_clock::now();
-
     // TODO: should this be done before everything else?
     // ---------------------- downsample using VoxelGrid --------------------------------
 
@@ -609,7 +632,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     // time
     auto plane_seg_stop = std::chrono::high_resolution_clock::now();
 
-    // ------------------ euclidian cluster extraction ------------------
+    // ------------------ euclidean cluster extraction ------------------
     // time
     auto euc_start = std::chrono::high_resolution_clock::now();
     
@@ -629,15 +652,15 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
 
     // time
     auto cluster_start = std::chrono::high_resolution_clock::now();
-
+    /*
     // create a Point Cloud containing the points of of the clusters (just the outline points)
     pcl::PointCloud<pcl::PointXYZ>::Ptr clustered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     sensor_msgs::PointCloud2::Ptr clusters(new sensor_msgs::PointCloud2);
-    NASA_ARMS::PointIndicesArray centroids;
+    pointcloud_obstacle_processing::PointIndicesArray centroids;
     int cluster_count;  // how many clusters detected?
 
     create_cluster_cloud(planar_cloud_y, euc_cluster_indices, clustered_cloud, cluster_count, centroids);
-
+    */
 
     for (int i = 0; i < planar_cloud_y->points.size(); i++) {
       // safety first!
@@ -655,7 +678,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     occupancyGrid->info.width = occupancy_grid_width;
     occupancyGrid->info.height = occupancy_grid_height;
     occupancyGrid->data = std::vector<int8_t>(occupancy_grid_data, occupancy_grid_data + occupancy_grid_size);
-    occupancyGrid->header.frame_id = "/kinect2_link";
+    occupancyGrid->header.frame_id = "world";
 
     occupancy_grid_publisher.publish(*occupancyGrid);
 
@@ -668,7 +691,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
 
     pcl::toROSMsg(*clustered_cloud, *clusters);
 
-    clusters->header.frame_id = "/kinect2_link";
+    clusters->header.frame_id = "/world";
     clusters->header.stamp = ros::Time::now();
 
     euc_cluster_publisher.publish(clusters);
@@ -731,16 +754,19 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     ROS_ERROR("---------euclidian clustering: %f seconds (%f) percent", euc_cluster_elapsed_time, euc_cluster_percent);
     ROS_ERROR("-------cluster cloud creation: %f seconds (%f) percent", cluster_elapsed_time, cluster_percent);
     ROS_ERROR("-------------------------------------------");
-    passthrough_cloud.clear();
+    tf_input_cloud.clear();
   }
 }
 
 int main (int argc, char** argv)
 {
   // Initialize ROS
-  ros::init (argc, argv, "obstacle_detection");
+  ros::init (argc, argv, "pointcloud_obstacle_detection");
   ros::NodeHandle nh ("~");
   ros::NodeHandle nh_pub;
+
+
+  tf2_ros::TransformListener tfListener(tfBuffer);
 
   nh.param("accumulate_count", frames_to_accumulate, 2);
   current_frame_count = 0;
@@ -759,7 +785,7 @@ int main (int argc, char** argv)
   nh.param("dev_percent", dev_percent, (float) 0.5);
 
   occupancy_grid_width = (int)ceil((fabs(pt_lower_lim_x) + fabs(pt_upper_lim_x)) / block_size);
-  occupancy_grid_height = (int)ceil((fabs(pt_upper_lim_z) - fabs(pt_lower_lim_z)) / block_size);
+  occupancy_grid_height = (int)ceil((fabs(pt_upper_lim_z) + fabs(pt_lower_lim_z)) / block_size);
   occupancy_grid_size = occupancy_grid_width * occupancy_grid_height;
   occupancy_grid_pt_counts = new long long[occupancy_grid_size];
   row_averages = new long long[occupancy_grid_height];
@@ -777,6 +803,29 @@ int main (int argc, char** argv)
   nh.param("euc_max_cluster_size", euc_max_cluster_size, 20000);  // max # of points in an object cluster
   nh.param("convex_hull_alpha", convex_hull_alpha, (float)180.0);  // max internal angle of the geometric shape formed by points.
 
+  ROS_ERROR("------------------------PARAM VALUES-------------------------");
+  ROS_ERROR("               accumulate_count: %d", frames_to_accumulate);
+  ROS_ERROR("                          x_min: %f", pt_lower_lim_x);
+  ROS_ERROR("                          x_max: %f", pt_upper_lim_x);
+  ROS_ERROR("                          y_min: %f", pt_lower_lim_y);
+  ROS_ERROR("                          y_max: %f", pt_upper_lim_y);
+  ROS_ERROR("                          z_min: %f", pt_lower_lim_z);
+  ROS_ERROR("                          z_max: %f", pt_upper_lim_z);
+  ROS_ERROR("                     block_size: %f", block_size);
+  ROS_ERROR("                    dev_percent: %f", dev_percent);
+  ROS_ERROR("                downsample_size: %f", downsample_leaf_size);
+  ROS_ERROR("     statisctical_outlier_meanK: %d", statistical_outlier_meanK );
+  ROS_ERROR("statistical_outlier_stdDevThres: %f", statistical_outlier_stdDevThres);
+  ROS_ERROR("       plane_segment_dist_thres: %f", plane_segment_dist_thres);
+  ROS_ERROR("            plane_segment_angle: %d", plane_segment_angle);
+  ROS_ERROR("          euc_cluster_tolerance: %f", euc_cluster_tolerance);
+  ROS_ERROR("           euc_min_cluster_size: %d", euc_min_cluster_size);
+  ROS_ERROR("           euc_max_cluster_size: %d", euc_max_cluster_size);
+  ROS_ERROR("----------------occupancy_grid_size----------------------");
+  ROS_ERROR("           occupancy_grid_width: %d", occupancy_grid_width);
+  ROS_ERROR("          occupancy_grid_heigth: %d", occupancy_grid_height);
+  ROS_ERROR("            occupancy_grid_size: %d", occupancy_grid_size);
+
   // Create a ROS subscriber for the input point cloud
   ros::Subscriber sub = nh.subscribe (point_topic, 1, cloud_cb);
 
@@ -786,7 +835,7 @@ int main (int argc, char** argv)
   indices_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("indices_cloud", 1000);
   planar_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("planar_cloud", 1000);
   filtered_cloud_publisher = nh.advertise<sensor_msgs::PointCloud2>("cloud_f", 1000);
-  centroid_publisher = nh.advertise<NASA_ARMS::PointIndicesArray>("centroids", 1);
+  centroid_publisher = nh.advertise<pointcloud_obstacle_processing::PointIndicesArray>("centroids", 1);
   euc_cluster_publisher = nh.advertise<sensor_msgs::PointCloud2> ("euc_clusters", 5);
   occupancy_grid_publisher = nh.advertise<nav_msgs::OccupancyGrid> ("occupancy_grid", 1);
 
