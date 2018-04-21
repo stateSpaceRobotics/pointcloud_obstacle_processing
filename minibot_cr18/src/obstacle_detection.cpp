@@ -122,8 +122,13 @@ tf2_ros::Buffer tfBuffer;
 geometry_msgs::TransformStamped transformStamped;
 
 
-// TODO: Document
-int get_occupancy_grid_location(float x, float y, float x_min, float y_max, float block_size, int occupancy_grid_width)
+struct Vertex
+{
+    float x;
+    float y;
+};
+
+std::pair<int, int> get_occupancy_grid_x_y(float &x, float &y, float &x_min, float &y_max, float &block_size)
 {
   int x_count = 0;
   int y_count = 0;
@@ -138,7 +143,15 @@ int get_occupancy_grid_location(float x, float y, float x_min, float y_max, floa
     y_count++;
   }
 
-  return y_count*occupancy_grid_width + x_count;
+  return std::pair<int, int>(x_count, y_count);
+};
+
+// TODO: Document
+int get_occupancy_grid_location(float x, float y, float x_min, float y_max, float block_size, int occupancy_grid_width)
+{
+
+  std::pair<int, int>grid_xy = get_occupancy_grid_x_y(x, y, x_min, y_max, block_size);
+  return grid_xy.second*occupancy_grid_width + grid_xy.first;
 
 
   /*
@@ -522,6 +535,195 @@ void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud
   }
 }
 
+void traceShadow(const Vertex& v1, const Vertex& v2, char* occupancy_grid_data)
+{
+  int x0 = v1.x, x1 = v2.x, y0 = v1.y, y1 = v2.y;
+  int steep = abs(y1 - y0) > abs(x1 - x0);
+
+  // swap the co-ordinates if slope > 1 or we
+  // draw backwards
+  if (steep)
+  {
+    std::swap(x0, y0);
+    std::swap(x1, y1);
+  }
+  if (x0 > x1)
+  {
+    std::swap(x0, x1);
+    std::swap(y0, y1);
+  }
+
+  //compute the slope
+  float dx = x1 - x0;
+  float dy = y1 - y0;
+  float gradient = dy / dx;
+  if (dx == 0.0)
+    gradient = 1;
+
+  int xpxl1 = x0;
+  int xpxl2 = x1;
+  float intersectY = y0;
+
+  // main loop
+  if (steep)
+  {
+    int x;
+    for (x = xpxl1; x <= xpxl2; x++)
+    {
+      // pixel coverage is determined by fractional
+      // part of y co-ordinate
+      int grid_y = x;
+      int grid_x = (int)std::floor(intersectY);
+
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
+      grid_x += 1;
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
+
+      intersectY += gradient;
+    }
+  }
+
+  else
+  {
+    int x;
+    for (x = xpxl1; x <= xpxl2; x++)
+    {
+      // pixel coverage is determined by fractional
+      // part of y co-ordinate
+      int grid_y = (int)std::floor(intersectY);
+      int grid_x = x;
+
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
+      grid_y += 1;
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
+
+      intersectY += gradient;
+    }
+  }
+
+}
+
+std::pair<int, int> calculate_shadow_cast(char *occupancy_grid_data,
+                                          const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, float x_min,
+                                          float x_max, pcl::PointXYZ y_min_point, float y_max, float &width) {
+  float a = y_min_point.z;
+  float b = fabs(y_min_point.y);
+  float c = sqrt(a * a + b * b);
+  float e = fabs(y_max) - fabs(y_min_point.y);
+  float D = asin(a / c);
+  float d = tan(D) * e + 0.25;
+
+  width = x_max - x_min;
+
+  ROS_ERROR("distance of shadow: %f", d);
+  ROS_ERROR("width of obstacle: %f", width);
+
+  float v_len = sqrt(y_min_point.x * y_min_point.x + y_min_point.y * y_min_point.y + y_min_point.z * y_min_point.z);
+
+  ROS_ERROR("vector_length: %f", v_len);
+
+  pcl::PointXYZ norm_vector(y_min_point.x / v_len, y_min_point.y / v_len, y_min_point.z / v_len);
+
+  norm_vector.x *= d;
+  norm_vector.y *= d;
+  norm_vector.z *= d;
+
+  ROS_ERROR("normalized_vector: %f, %f, %f", norm_vector.x, norm_vector.y, norm_vector.z);
+
+  pcl::PointXYZ shadow_end_point(norm_vector.x + y_min_point.x, norm_vector.y + y_min_point.y, norm_vector.z + y_min_point.z);
+
+  ROS_ERROR("shadow_end_point: %f, %f, %f", shadow_end_point.x, shadow_end_point.y, shadow_end_point.z);
+
+  geometry_msgs::TransformStamped transform_to_world = tfBuffer.lookupTransform("world", "kinect2_link", ros::Time(0));
+  tf::StampedTransform tf_to_world;
+  tf::transformStampedMsgToTF(transform_to_world, tf_to_world);
+
+  pcl::PointCloud<pcl::PointXYZ> kinect_cloud;
+  pcl::PointCloud<pcl::PointXYZ> world_shadow_cloud;
+
+  kinect_cloud.points.push_back(shadow_end_point);
+  pcl_ros::transformPointCloud(kinect_cloud, world_shadow_cloud, tf_to_world);
+
+
+  return get_occupancy_grid_x_y(world_shadow_cloud.points[0].y, world_shadow_cloud.points[0].x, pt_lower_lim_y, pt_upper_lim_x, block_size);
+}
+
+void handle_shadow_casting(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, std::vector<int> &cluster, char *occupancy_grid_data)
+{
+  if (cluster.size() < 2)
+  {
+    return;
+  }
+
+  // transform from the world frame into the kinect2 frame.
+  geometry_msgs::TransformStamped reverse_transform= tfBuffer.lookupTransform("kinect2_link", "world", ros::Time(0));
+  tf::StampedTransform reverse_tf;
+  tf::transformStampedMsgToTF(reverse_transform, reverse_tf);
+
+  pcl::PointCloud<pcl::PointXYZ> shadow_cloud;
+  pcl::PointCloud<pcl::PointXYZ> transformed_point_cloud;
+
+  for(int i = 0; i < cluster.size(); i++)
+  {
+    shadow_cloud.points.push_back(input_cloud->points[cluster[i]]);
+  }
+
+  pcl_ros::transformPointCloud(shadow_cloud, transformed_point_cloud, reverse_tf);
+
+
+
+  pcl::PointXYZ y_min_point = transformed_point_cloud.points[0];
+  float y_max = transformed_point_cloud.points[0].y;
+  float x_min = transformed_point_cloud.points[0].x;
+  float x_max = transformed_point_cloud.points[0].x;
+  float width = 0;
+
+  for (int i = 1; i < transformed_point_cloud.points.size(); i++)
+  {
+    if (transformed_point_cloud.points[i].y < y_min_point.y) y_min_point = transformed_point_cloud.points[i];
+    if (transformed_point_cloud.points[i].y > y_max) y_max = transformed_point_cloud.points[i].y;
+    if (transformed_point_cloud.points[i].x < x_min) x_min = transformed_point_cloud.points[i].x;
+    if (transformed_point_cloud.points[i].x > x_max) x_max = transformed_point_cloud.points[i].x;
+  }
+
+  ROS_ERROR("y_min_point: %f, %f, %f", y_min_point.x, y_min_point.y, y_min_point.z);
+  ROS_ERROR("y_max: %f", y_max);
+  ROS_ERROR("x_min: %f", x_min);
+  ROS_ERROR("x_max: %f", x_max);
+
+
+
+  // kinect2 frame input, world frame output
+  std::pair<int, int> end_line_grid_xy = calculate_shadow_cast(occupancy_grid_data, transformed_point_cloud.makeShared(), x_min, x_max, y_min_point, y_max, width);
+
+  // transform from kinect2 to world frame
+  geometry_msgs::TransformStamped transform_to_world = tfBuffer.lookupTransform("world", "kinect2_link", ros::Time(0));
+  tf::StampedTransform world_tf;
+  tf::transformStampedMsgToTF(transform_to_world, world_tf);
+
+  pcl::PointCloud<pcl::PointXYZ> start_point;
+  start_point.points.push_back(y_min_point);
+  pcl::PointCloud<pcl::PointXYZ> transformed_start_point_cloud;
+
+  pcl_ros::transformPointCloud(start_point, transformed_start_point_cloud, world_tf);
+
+  // world frame
+  std::pair<int, int> start_line_grid_xy = get_occupancy_grid_x_y(transformed_start_point_cloud.points[0].y, transformed_start_point_cloud.points[0].x, pt_lower_lim_y, pt_upper_lim_x, block_size);
+
+  ROS_ERROR("line_start_point: %f, %f", transformed_start_point_cloud.points[0].x, transformed_start_point_cloud.points[0].y);
+  ROS_ERROR("occupancy_grid start_point: %d, %d", start_line_grid_xy.first, start_line_grid_xy.second);
+
+  Vertex v1, v2;
+  v1.x = start_line_grid_xy.first;
+  v1.y = start_line_grid_xy.second;
+
+  v2.x = end_line_grid_xy.first;
+  v2.y = end_line_grid_xy.second;
+
+
+  traceShadow(v1, v2, occupancy_grid_data);
+
+}
 
 void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
   /* Called when a PointCloud is received from the Kinect.
@@ -553,7 +755,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     pcl::PointCloud<pcl::PointXYZ> passthrough_cloud;
     pcl_ros::transformPointCloud(tf_input_cloud, passthrough_cloud, new_tf);
 
-    ROS_ERROR("point cloud size: %d", passthrough_cloud.points.size());
+    ROS_DEBUG("point cloud size: %d", passthrough_cloud.points.size());
 
     current_frame_count = 0;
     //pcl::PointCloud<pcl::PointXYZ>::Ptr passthrough_cloud(
@@ -582,7 +784,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     // time
     auto occ_stop = std::chrono::high_resolution_clock::now();
     // TODO: should this be done before everything else?
-    ROS_ERROR("after passthrough point cloud size: %d", downsample_input_cloud->points.size());
+    ROS_DEBUG("after passthrough point cloud size: %d", downsample_input_cloud->points.size());
     // ---------------------- downsample using VoxelGrid --------------------------------
 
     // time
@@ -594,7 +796,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     auto downsample_stop = std::chrono::high_resolution_clock::now();
 
     // ------------------- statistical outlier removal ---------------------  // TODO: Determine if this is needed
-    ROS_ERROR("after downsampling point cloud size: %d", statistical_outlier_input_cloud->points.size());
+    ROS_DEBUG("after downsampling point cloud size: %d", statistical_outlier_input_cloud->points.size());
     // time
     auto stat_out_rem_start = std::chrono::high_resolution_clock::now();
 
@@ -636,7 +838,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     // ------------------ euclidean cluster extraction ------------------
     // time
     auto euc_start = std::chrono::high_resolution_clock::now();
-    /*
+
     // create data structures for euclidian cluster extraction.
     pcl::search::KdTree<pcl::PointXYZ>::Ptr euc_cluster_tree(new pcl::search::KdTree<pcl::PointXYZ>);
     euc_cluster_tree->setInputCloud(planar_cloud_y);
@@ -646,7 +848,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     extract_euclidian_clusters(planar_cloud_y, euc_cluster_indices, euc_cluster_tolerance, euc_min_cluster_size,
                                euc_max_cluster_size, euc_cluster_tree);
 
-    */
+
     // time
     auto euc_stop = std::chrono::high_resolution_clock::now();
     // ---------------------- cluster cloud creation ------------------------
@@ -663,6 +865,13 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     create_cluster_cloud(planar_cloud_y, euc_cluster_indices, clustered_cloud, cluster_count, centroids);
     */
 
+
+    for (int i = 0; i < euc_cluster_indices.size(); i++)
+    {
+      ROS_ERROR("-------------------Cluster index: %d----------------------", i);
+      handle_shadow_casting(planar_cloud_y, euc_cluster_indices[i].indices, occupancy_grid_data);
+    }
+
     for (int i = 0; i < planar_cloud_y->points.size(); i++) {
       // safety first!
       if (pcl_isnan(planar_cloud_y->points[i].x)) {
@@ -673,6 +882,10 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
                                               pt_upper_lim_x, block_size, occupancy_grid_width);
       occupancy_grid_data[index] = 100; // mark it as a bad thing.
     }
+
+
+
+
 
     nav_msgs::OccupancyGrid *occupancyGrid = new nav_msgs::OccupancyGrid();
     occupancyGrid->info.resolution = block_size;
@@ -749,19 +962,19 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     auto euc_cluster_percent = (float) ((euc_cluster_elapsed_time / total_time) * 100);
     auto cluster_percent = (float) ((cluster_elapsed_time / total_time) * 100);
 
-    ROS_ERROR("---------Time summaries:-------------------");
-    ROS_ERROR("-------------------TOTAL TIME: %f seconds", total_time);
-    ROS_ERROR("----------initial conversions: %f seconds (%f) percent", init_time_elapsed, init_percent);
-    //ROS_ERROR("--------passthrough filtering: %f seconds (%f) percent", passthrough_time_elapsed, passthrough_percent);
-    ROS_ERROR("------occupancy grid creation: %f seconds (%f) percent", occ_elapsed_time, occ_percent);
-    //ROS_ERROR("......iteration through cloud: %f seconds (%f) percent (of parent)", occ_grid_loop_elapsed_time, occ_grid_loop_percent);
-    ROS_ERROR("-----------------downsampling: %f seconds (%f) percent", downsample_elapsed_time, downsample_percent);
-    ROS_ERROR("--statistical outlier removal: %f seconds (%f) percent", stat_out_rem_elapsed_time,
-              stat_out_rem_percent);
-    ROS_ERROR("-----------plane segmentation: %f seconds (%f) percent", plane_seg_elapsed_time, plane_seg_percent);
-    ROS_ERROR("---------euclidian clustering: %f seconds (%f) percent", euc_cluster_elapsed_time, euc_cluster_percent);
-    ROS_ERROR("-------cluster cloud creation: %f seconds (%f) percent", cluster_elapsed_time, cluster_percent);
-    ROS_ERROR("-------------------------------------------");
+    ROS_DEBUG("---------Time summaries:-------------------");
+    ROS_DEBUG("-------------------TOTAL TIME: %f seconds", total_time);
+    ROS_DEBUG("----------initial conversions: %f seconds (%f) percent", init_time_elapsed, init_percent);
+    //ROS_DEBUG("--------passthrough filtering: %f seconds (%f) percent", passthrough_time_elapsed, passthrough_percent);
+    ROS_DEBUG("------occupancy grid creation: %f seconds (%f) percent", occ_elapsed_time, occ_percent);
+    //ROS_DEBUG("......iteration through cloud: %f seconds (%f) percent (of parent)", occ_grid_loop_elapsed_time, occ_grid_loop_percent);
+    ROS_DEBUG("-----------------downsampling: %f seconds (%f) percent", downsample_elapsed_time, downsample_percent);
+    ROS_DEBUG("--statistical outlier removal: %f seconds (%f) percent", stat_out_rem_elapsed_time,
+         stat_out_rem_percent);
+    ROS_DEBUG("-----------plane segmentation: %f seconds (%f) percent", plane_seg_elapsed_time, plane_seg_percent);
+    ROS_DEBUG("---------euclidian clustering: %f seconds (%f) percent", euc_cluster_elapsed_time, euc_cluster_percent);
+    ROS_DEBUG("-------cluster cloud creation: %f seconds (%f) percent", cluster_elapsed_time, cluster_percent);
+    ROS_DEBUG("-------------------------------------------");
     tf_input_cloud.clear();
   }
 }
@@ -811,28 +1024,28 @@ int main (int argc, char** argv)
   nh.param("euc_max_cluster_size", euc_max_cluster_size, 20000);  // max # of points in an object cluster
   nh.param("convex_hull_alpha", convex_hull_alpha, (float)180.0);  // max internal angle of the geometric shape formed by points.
 
-  ROS_ERROR("------------------------PARAM VALUES-------------------------");
-  ROS_ERROR("               accumulate_count: %d", frames_to_accumulate);
-  ROS_ERROR("                          x_min: %f", pt_lower_lim_x);
-  ROS_ERROR("                          x_max: %f", pt_upper_lim_x);
-  ROS_ERROR("                          y_min: %f", pt_lower_lim_y);
-  ROS_ERROR("                          y_max: %f", pt_upper_lim_y);
-  ROS_ERROR("                          z_min: %f", pt_lower_lim_z);
-  ROS_ERROR("                          z_max: %f", pt_upper_lim_z);
-  ROS_ERROR("                     block_size: %f", block_size);
-  ROS_ERROR("                    dev_percent: %f", dev_percent);
-  ROS_ERROR("                downsample_size: %f", downsample_leaf_size);
-  ROS_ERROR("     statisctical_outlier_meanK: %d", statistical_outlier_meanK );
-  ROS_ERROR("statistical_outlier_stdDevThres: %f", statistical_outlier_stdDevThres);
-  ROS_ERROR("       plane_segment_dist_thres: %f", plane_segment_dist_thres);
-  ROS_ERROR("            plane_segment_angle: %d", plane_segment_angle);
-  ROS_ERROR("          euc_cluster_tolerance: %f", euc_cluster_tolerance);
-  ROS_ERROR("           euc_min_cluster_size: %d", euc_min_cluster_size);
-  ROS_ERROR("           euc_max_cluster_size: %d", euc_max_cluster_size);
-  ROS_ERROR("----------------occupancy_grid_size----------------------");
-  ROS_ERROR("           occupancy_grid_width: %d", occupancy_grid_width);
-  ROS_ERROR("          occupancy_grid_heigth: %d", occupancy_grid_height);
-  ROS_ERROR("            occupancy_grid_size: %d", occupancy_grid_size);
+  ROS_DEBUG("------------------------PARAM VALUES-------------------------");
+  ROS_DEBUG("               accumulate_count: %d", frames_to_accumulate);
+  ROS_DEBUG("                          x_min: %f", pt_lower_lim_x);
+  ROS_DEBUG("                          x_max: %f", pt_upper_lim_x);
+  ROS_DEBUG("                          y_min: %f", pt_lower_lim_y);
+  ROS_DEBUG("                          y_max: %f", pt_upper_lim_y);
+  ROS_DEBUG("                          z_min: %f", pt_lower_lim_z);
+  ROS_DEBUG("                          z_max: %f", pt_upper_lim_z);
+  ROS_DEBUG("                     block_size: %f", block_size);
+  ROS_DEBUG("                    dev_percent: %f", dev_percent);
+  ROS_DEBUG("                downsample_size: %f", downsample_leaf_size);
+  ROS_DEBUG("     statisctical_outlier_meanK: %d", statistical_outlier_meanK );
+  ROS_DEBUG("statistical_outlier_stdDevThres: %f", statistical_outlier_stdDevThres);
+  ROS_DEBUG("       plane_segment_dist_thres: %f", plane_segment_dist_thres);
+  ROS_DEBUG("            plane_segment_angle: %d", plane_segment_angle);
+  ROS_DEBUG("          euc_cluster_tolerance: %f", euc_cluster_tolerance);
+  ROS_DEBUG("           euc_min_cluster_size: %d", euc_min_cluster_size);
+  ROS_DEBUG("           euc_max_cluster_size: %d", euc_max_cluster_size);
+  ROS_DEBUG("           occupancy_grid_width: %d", occupancy_grid_width);
+  ROS_DEBUG("----------------occupancy_grid_size----------------------");
+  ROS_DEBUG("          occupancy_grid_heigth: %d", occupancy_grid_height);
+  ROS_DEBUG("            occupancy_grid_size: %d", occupancy_grid_size);
 
   // Create a ROS subscriber for the input point cloud
   ros::Subscriber sub = nh.subscribe (point_topic, 1, cloud_cb);
