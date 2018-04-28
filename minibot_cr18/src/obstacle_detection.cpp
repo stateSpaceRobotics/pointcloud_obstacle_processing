@@ -462,80 +462,6 @@ float calculate_distance(float x1, float x2, float y1, float y2, float z1, float
   return (float)sqrt(x_dist + y_dist + z_dist);
 }
 
-void create_cluster_cloud(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud,
-                          std::vector<pcl::PointIndices> &cluster_indices,
-                          pcl::PointCloud<pcl::PointXYZ>::Ptr &output_cloud, int &cluster_count,
-                          pointcloud_obstacle_processing::PointIndicesArray &centroids)
-{
-  /* Works with the extract_euclidian_clusters function to create a point cloud of the outlines of the euclidian cluster
-   * points. The convex (or concave) hull part creates a polygon from the points and that's what's added to the point
-   * cloud. This is useful because we don't care about all the points within the obstacle, we just want to know where
-   * its borders are.
-   *
-   * Also calculates the centroids of each cluster of points and the maximum distance from a centroid to a border point
-   * for use to pass in the obstacle locations to Stage.
-   *
-   * Parameters:
-   * input_cloud: input point cloud used
-   * cluster_indices: points in each cluster in the input_cloud
-   * output_cloud: cloud containing the convex or concave hulls of each group of points
-   * cluster_count: Integer telling us how many clusters (obstacles) have been found.
-   * centroids: empty vector that will hold the centroid values and the associated distances.
-   */
-
-  cluster_count = 0;
-  // iterate through the list of clusters
-  for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin(); it != cluster_indices.end(); ++it)
-  {
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_cluster (new pcl::PointCloud<pcl::PointXYZ>);
-    float x_sum = 0, y_sum = 0, z_sum = 0;
-    int point_count = 0;
-
-    // iterate through each point in the cluster, adding it to the point cloud
-    for (std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); ++pit)
-    {
-      cloud_cluster->points.push_back (input_cloud->points[*pit]);
-      x_sum += input_cloud->points[*pit].x;
-      y_sum += input_cloud->points[*pit].y;
-      z_sum += input_cloud->points[*pit].z;
-      point_count += 1;
-    }
-
-    pointcloud_obstacle_processing::PointWithRad point;
-    point.x = x_sum/point_count;
-    point.y = y_sum/point_count;
-    point.z = z_sum/point_count;
-
-    float max_dist = 0;
-
-    for (std::vector<int>::const_iterator pit = it->indices.begin(); pit != it->indices.end(); ++pit)
-    {
-      float dist = calculate_distance(input_cloud->points[*pit].x, point.x, input_cloud->points[*pit].y, point.y,
-                                      input_cloud->points[*pit].z, point.z);
-      if (dist > max_dist)
-      {
-        max_dist = dist;
-      }
-    }
-
-    point.r = max_dist;
-
-    centroids.points.push_back(point);
-
-    cluster_count += 1;
-
-    // ---------- convex hull -----------------
-    // create a 'hull', or outline of points for each cluster.
-    pcl::ConvexHull<pcl::PointXYZ> hull;
-    pcl::PointCloud<pcl::PointXYZ>::Ptr convexHull (new pcl::PointCloud<pcl::PointXYZ>);
-
-    hull.setInputCloud(cloud_cluster);
-    // hull.setAlpha(convex_hull_alpha);
-    hull.reconstruct(*convexHull);
-
-    *output_cloud += *convexHull;  // add these border points to the output cloud
-  }
-}
 
 void traceShadow(const Vertex& v1, const Vertex& v2, char* occupancy_grid_data)
 {
@@ -606,26 +532,26 @@ void traceShadow(const Vertex& v1, const Vertex& v2, char* occupancy_grid_data)
 }
 
 std::pair<int, int> calculate_shadow_cast(char *occupancy_grid_data,
-                                          const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, float x_min,
-                                          float x_max, pcl::PointXYZ y_min_point, float y_max, float &width) {
-  float a = y_min_point.z;
-  float b = fabs(y_min_point.y);
+                                          const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_cloud, float horizontal_min,
+                                          float horizontal_max, pcl::PointXYZ vertical_min_pt, float vertical_max, float &width) {
+  float a = vertical_min_pt.z;
+  float b = fabs(vertical_min_pt.x);
   float c = sqrt(a * a + b * b);
-  float e = fabs(y_max) - fabs(y_min_point.y);
+  float e = fabs(vertical_max) - fabs(vertical_min_pt.x);
   float D = asin(a / c);
   float d = tan(D) * e + 0.25;
 
-  width = x_max - x_min;
+  width = horizontal_max - horizontal_min;
 
   ROS_ERROR("distance of shadow: %f", d);
   ROS_ERROR("width of obstacle: %f", width);
   ROS_ERROR("height of obstacle: %f", e);
 
-  float v_len = sqrt(y_min_point.x * y_min_point.x + y_min_point.y * y_min_point.y + y_min_point.z * y_min_point.z);
+  float v_len = sqrt(vertical_min_pt.x * vertical_min_pt.x + vertical_min_pt.y * vertical_min_pt.y + vertical_min_pt.z * vertical_min_pt.z);
 
   ROS_ERROR("vector_length: %f", v_len);
 
-  pcl::PointXYZ norm_vector(y_min_point.x / v_len, y_min_point.y / v_len, y_min_point.z / v_len);
+  pcl::PointXYZ norm_vector(vertical_min_pt.x / v_len, vertical_min_pt.y / v_len, vertical_min_pt.z / v_len);
 
   norm_vector.x *= d;
   norm_vector.y *= d;
@@ -633,7 +559,7 @@ std::pair<int, int> calculate_shadow_cast(char *occupancy_grid_data,
 
   ROS_ERROR("normalized_vector: %f, %f, %f", norm_vector.x, norm_vector.y, norm_vector.z);
 
-  pcl::PointXYZ shadow_end_point(norm_vector.x + y_min_point.x, norm_vector.y + y_min_point.y, norm_vector.z + y_min_point.z);
+  pcl::PointXYZ shadow_end_point(norm_vector.x + vertical_min_pt.x, norm_vector.y + vertical_min_pt.y, norm_vector.z + vertical_min_pt.z);
 
   ROS_ERROR("shadow_end_point: %f, %f, %f", shadow_end_point.x, shadow_end_point.y, shadow_end_point.z);
 
@@ -675,29 +601,29 @@ void handle_shadow_casting(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_clou
 
 
 
-  pcl::PointXYZ y_min_point = transformed_point_cloud.points[0];
-  float y_max = transformed_point_cloud.points[0].y;
-  float x_min = transformed_point_cloud.points[0].x;
-  float x_max = transformed_point_cloud.points[0].x;
+  pcl::PointXYZ vertical_axis_min_pt = transformed_point_cloud.points[0];
+  float vertical_axis_max = transformed_point_cloud.points[0].x;
+  float horizontal_axis_min = transformed_point_cloud.points[0].y;
+  float horizontal_axis_max = transformed_point_cloud.points[0].y;
   float width = 0;
 
   for (int i = 1; i < transformed_point_cloud.points.size(); i++)
   {
-    if (transformed_point_cloud.points[i].y < y_min_point.y) y_min_point = transformed_point_cloud.points[i];
-    if (transformed_point_cloud.points[i].y > y_max) y_max = transformed_point_cloud.points[i].y;
-    if (transformed_point_cloud.points[i].x < x_min) x_min = transformed_point_cloud.points[i].x;
-    if (transformed_point_cloud.points[i].x > x_max) x_max = transformed_point_cloud.points[i].x;
+    if (transformed_point_cloud.points[i].x < vertical_axis_min_pt.x) vertical_axis_min_pt = transformed_point_cloud.points[i];
+    if (transformed_point_cloud.points[i].x > vertical_axis_max) vertical_axis_max = transformed_point_cloud.points[i].x;
+    if (transformed_point_cloud.points[i].y < horizontal_axis_min) horizontal_axis_min = transformed_point_cloud.points[i].y;
+    if (transformed_point_cloud.points[i].y > horizontal_axis_max) horizontal_axis_max = transformed_point_cloud.points[i].y;
   }
 
-  ROS_ERROR("y_min_point: %f, %f, %f", y_min_point.x, y_min_point.y, y_min_point.z);
-  ROS_ERROR("y_max: %f", y_max);
-  ROS_ERROR("x_min: %f", x_min);
-  ROS_ERROR("x_max: %f", x_max);
+  ROS_ERROR("vertical_axis_min_pt: %f, %f, %f", vertical_axis_min_pt.x, vertical_axis_min_pt.y, vertical_axis_min_pt.z);
+  ROS_ERROR("vertical_axis_max: %f", vertical_axis_max);
+  ROS_ERROR("horizontal_axis_min: %f", horizontal_axis_min);
+  ROS_ERROR("horizontal_axis_max: %f", horizontal_axis_max);
 
 
 
   // kinect2 frame input, world frame output
-  std::pair<int, int> end_line_grid_xy = calculate_shadow_cast(occupancy_grid_data, transformed_point_cloud.makeShared(), x_min, x_max, y_min_point, y_max, width);
+  std::pair<int, int> end_line_grid_xy = calculate_shadow_cast(occupancy_grid_data, transformed_point_cloud.makeShared(), horizontal_axis_min, horizontal_axis_max, vertical_axis_min_pt, vertical_axis_max, width);
 
   // transform from kinect2 to world frame
   geometry_msgs::TransformStamped transform_to_world = tfBuffer.lookupTransform("world", "kinect2_link", ros::Time(0));
@@ -705,7 +631,7 @@ void handle_shadow_casting(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_clou
   tf::transformStampedMsgToTF(transform_to_world, world_tf);
 
   pcl::PointCloud<pcl::PointXYZ> start_point;
-  start_point.points.push_back(y_min_point);
+  start_point.points.push_back(vertical_axis_min_pt);
   pcl::PointCloud<pcl::PointXYZ> transformed_start_point_cloud;
 
   pcl_ros::transformPointCloud(start_point, transformed_start_point_cloud, world_tf);
