@@ -17,7 +17,7 @@ pointcloud_obstacle_processing:
                 passthrough_filter_enable: true
 
                 statistical_outlier_meanK: 15
-                statistical_outlier_stdDevThres: 2.0
+                statistical_outlier_stdDevThres: 4
 
                 plane_segment_dist_thres: 0.040
                 plane_segment_angle: 20

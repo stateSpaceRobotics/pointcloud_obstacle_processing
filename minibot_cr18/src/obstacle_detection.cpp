@@ -75,7 +75,7 @@ ros::Publisher centroid_publisher;
 ros::Publisher euc_cluster_publisher;
 ros::Publisher occupancy_grid_publisher;
 
-pcl::PointCloud<pcl::PointXYZ> tf_input_cloud; // for the accumulation
+pcl::PointCloud<pcl::PointXYZ> passthrough_input_cloud; // for the accumulation
 
 const char *point_topic = "/kinect2/qhd/points";
 
@@ -577,9 +577,9 @@ void traceShadow(const Vertex& v1, const Vertex& v2, char* occupancy_grid_data)
       int grid_y = x;
       int grid_x = (int)std::floor(intersectY);
 
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 100;
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
       grid_x += 1;
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 100;
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
 
       intersectY += gradient;
     }
@@ -595,9 +595,9 @@ void traceShadow(const Vertex& v1, const Vertex& v2, char* occupancy_grid_data)
       int grid_y = (int)std::floor(intersectY);
       int grid_x = x;
 
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 100;
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
       grid_y += 1;
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 100;
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
 
       intersectY += gradient;
     }
@@ -619,6 +619,7 @@ std::pair<int, int> calculate_shadow_cast(char *occupancy_grid_data,
 
   ROS_ERROR("distance of shadow: %f", d);
   ROS_ERROR("width of obstacle: %f", width);
+  ROS_ERROR("height of obstacle: %f", e);
 
   float v_len = sqrt(y_min_point.x * y_min_point.x + y_min_point.y * y_min_point.y + y_min_point.z * y_min_point.z);
 
@@ -722,6 +723,7 @@ void handle_shadow_casting(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_clou
   v2.x = end_line_grid_xy.first;
   v2.y = end_line_grid_xy.second;
 
+  ROS_ERROR("line end points: %d, %d", end_line_grid_xy.first, end_line_grid_xy.second);
 
   traceShadow(v1, v2, occupancy_grid_data);
 
@@ -737,27 +739,29 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
   // Container for original and filtered data
   pcl::PCLPointCloud2 *initial_cloud = new pcl::PCLPointCloud2;
   pcl::PCLPointCloud2ConstPtr initial_cloud_ptr(initial_cloud);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr post_transform_cloud(new pcl::PointCloud<pcl::PointXYZ>);
   pcl::PointCloud<pcl::PointXYZ>::Ptr accumulator_input_cloud(new pcl::PointCloud<pcl::PointXYZ>);
 
   // Convert to PCLPointCloud2 data type from ROS sensor_msgs
   pcl_conversions::toPCL(*cloud_msg, *initial_cloud);
-  pcl::fromPCLPointCloud2(*initial_cloud, *accumulator_input_cloud);
+  pcl::fromPCLPointCloud2(*initial_cloud, *post_transform_cloud);
 
   if (current_frame_count < frames_to_accumulate) {
-    tf_input_cloud += *accumulator_input_cloud;
+    transformStamped = tfBuffer.lookupTransform("world", "kinect2_link", ros::Time(0));
+    tf::StampedTransform new_tf;
+    tf::transformStampedMsgToTF(transformStamped, new_tf);
+    pcl::PointCloud<pcl::PointXYZ> passthrough_cloud;
+    pcl_ros::transformPointCloud(*post_transform_cloud, *accumulator_input_cloud, new_tf);
+    passthrough_input_cloud += *accumulator_input_cloud;
     current_frame_count += 1;
   } else {
 
     // TODO: Add output for final_cloud
     auto init_start = std::chrono::high_resolution_clock::now();
 
-    transformStamped = tfBuffer.lookupTransform("world", "kinect2_link", ros::Time(0));
-    tf::StampedTransform new_tf;
-    tf::transformStampedMsgToTF(transformStamped, new_tf);
-    pcl::PointCloud<pcl::PointXYZ> passthrough_cloud;
-    pcl_ros::transformPointCloud(tf_input_cloud, passthrough_cloud, new_tf);
 
-    ROS_DEBUG("point cloud size: %d", passthrough_cloud.points.size());
+
+    ROS_DEBUG("point cloud size: %d", passthrough_input_cloud.points.size());
 
     current_frame_count = 0;
     //pcl::PointCloud<pcl::PointXYZ>::Ptr passthrough_cloud(
@@ -781,7 +785,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     build_initial_occupancy_grid_dataset(occupancy_grid_size, occupancy_grid_height, occupancy_grid_width,
                                          occupancy_grid_data, pt_lower_lim_x,
                                          pt_upper_lim_x, pt_lower_lim_y, pt_upper_lim_y, pt_lower_lim_z, pt_upper_lim_z,
-                                         occupancy_grid_pt_counts, row_averages, passthrough_cloud,
+                                         occupancy_grid_pt_counts, row_averages, passthrough_input_cloud,
                                          *downsample_input_cloud);
     // time
     auto occ_stop = std::chrono::high_resolution_clock::now();
@@ -977,7 +981,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     ROS_DEBUG("---------euclidian clustering: %f seconds (%f) percent", euc_cluster_elapsed_time, euc_cluster_percent);
     ROS_DEBUG("-------cluster cloud creation: %f seconds (%f) percent", cluster_elapsed_time, cluster_percent);
     ROS_DEBUG("-------------------------------------------");
-    tf_input_cloud.clear();
+    passthrough_input_cloud.clear();
   }
 }
 
