@@ -1,13 +1,13 @@
 pointcloud_obstacle_processing:
         x_min: 0.0
-        x_max: 7.5
+        x_max: 4.5
         y_min: 0.0
-        y_max: 3.5
-        z_min: -0.25
-        z_max: 0.5
+        y_max: 3.78
+        z_min: -0.5
+        z_max: 0.25
 
         obstacle_detection:
-                accumulate_count: 4
+                accumulate_count: 200
                 block_size: 0.0375
                 dev_percent: 0.9
 
@@ -26,3 +26,5 @@ pointcloud_obstacle_processing:
                 euc_min_cluster_size: 5
                 euc_max_cluster_size: 20000
                 convex_hull_alpha: 180.0
+
+                publish_point_clouds: true

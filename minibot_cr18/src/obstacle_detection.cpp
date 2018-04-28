@@ -77,7 +77,7 @@ ros::Publisher occupancy_grid_publisher;
 
 pcl::PointCloud<pcl::PointXYZ> tf_input_cloud; // for the accumulation
 
-const char *point_topic = "/kinect2/sd/points";
+const char *point_topic = "/kinect2/qhd/points";
 
 int frames_to_accumulate;
 int current_frame_count;
@@ -113,6 +113,8 @@ float euc_cluster_tolerance;
 int euc_min_cluster_size;
 int euc_max_cluster_size;
 float convex_hull_alpha;
+
+bool publish_point_clouds;
 
 std::chrono::high_resolution_clock::time_point occ_grid_loop_start;
 std::chrono::high_resolution_clock::time_point occ_grid_loop_stop;
@@ -575,9 +577,9 @@ void traceShadow(const Vertex& v1, const Vertex& v2, char* occupancy_grid_data)
       int grid_y = x;
       int grid_x = (int)std::floor(intersectY);
 
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 100;
       grid_x += 1;
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 100;
 
       intersectY += gradient;
     }
@@ -593,9 +595,9 @@ void traceShadow(const Vertex& v1, const Vertex& v2, char* occupancy_grid_data)
       int grid_y = (int)std::floor(intersectY);
       int grid_x = x;
 
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 100;
       grid_y += 1;
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
+      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 100;
 
       intersectY += gradient;
     }
@@ -790,7 +792,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     // time
     auto downsample_start = std::chrono::high_resolution_clock::now();
     downsample_cloud(downsample_input_cloud, *statistical_outlier_input_cloud, downsample_leaf_size,
-                     downsample_publisher, true);
+                     downsample_publisher, publish_point_clouds);
 
     // time
     auto downsample_stop = std::chrono::high_resolution_clock::now();
@@ -803,7 +805,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     remove_statistical_outliers(statistical_outlier_input_cloud, statistical_outlier_output_cloud,
                                 statistical_outlier_meanK, statistical_outlier_stdDevThres,
                                 statistical_outlier_publisher,
-                                true);
+                                publish_point_clouds);
 
     // time
     auto stat_out_rem_stop = std::chrono::high_resolution_clock::now();
@@ -830,7 +832,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     segment_plane_and_extract_indices(planar_cloud_y, indices_cloud_y, filtered_cloud_y, coefficients_y, inliers_y,
                                       outliers_y, plane_axis_y, plane_segment_dist_thres, plane_segment_angle,
                                       planar_cloud_publisher, indices_cloud_publisher, filtered_cloud_publisher,
-                                      true, true, true);
+                                      publish_point_clouds, publish_point_clouds, publish_point_clouds);
 
     // time
     auto plane_seg_stop = std::chrono::high_resolution_clock::now();
@@ -963,7 +965,7 @@ void cloud_cb (const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
     auto cluster_percent = (float) ((cluster_elapsed_time / total_time) * 100);
 
     ROS_DEBUG("---------Time summaries:-------------------");
-    ROS_DEBUG("-------------------TOTAL TIME: %f seconds", total_time);
+    ROS_ERROR("-------------------TOTAL TIME: %f seconds", total_time);
     ROS_DEBUG("----------initial conversions: %f seconds (%f) percent", init_time_elapsed, init_percent);
     //ROS_DEBUG("--------passthrough filtering: %f seconds (%f) percent", passthrough_time_elapsed, passthrough_percent);
     ROS_DEBUG("------occupancy grid creation: %f seconds (%f) percent", occ_elapsed_time, occ_percent);
@@ -994,6 +996,7 @@ int main (int argc, char** argv)
 
   nh.param("downsample_input_data", downsample_input_data, true);  // make the dataset smaller (and faster to process)
   nh.param("passthrough_filter_enable", passthrough_filter_enable, true);  // do we wanna cut things out? (useful for trimming the points down to the dimensions of the field)
+  nh.param("publish_point_clouds", publish_point_clouds, true);
 
   nh_pub.param("x_min", pt_lower_lim_x, (float) -1.0);  // lower lim on x axis for passthrough filter
   nh_pub.param("x_max", pt_upper_lim_x, (float) 1.0);  // upper lim on x axis for passthrough filter
@@ -1016,7 +1019,7 @@ int main (int argc, char** argv)
   nh.param("statistical_outlier_meanK", statistical_outlier_meanK, 15);  // how many neighbor points to examine? (default: 50)
   nh.param("statistical_outlier_stdDevThres", statistical_outlier_stdDevThres, (float)1.0);  // deviation multiplier (default: 1.0)
 
-  nh.param("plane_segment_dist_thresh", plane_segment_dist_thres, (float)0.040);  // how close to be an inlier? (default: 0.01) Hella sensitive!
+  nh.param("plane_segment_dist_thres", plane_segment_dist_thres, (float)0.040);  // how close to be an inlier? (default: 0.01) Hella sensitive!
   nh.param("plane_segment_angle", plane_segment_angle, 20);
 
   nh.param("euc_cluster_tolerance", euc_cluster_tolerance, (float)0.4);
