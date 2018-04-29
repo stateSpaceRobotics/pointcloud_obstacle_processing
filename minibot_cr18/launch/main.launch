@@ -9,7 +9,8 @@
                         <arg name="worker_threads" value="2" />
 	        </include>
         <group ns="pointcloud_obstacle_processing">
-	        <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="static_tf_broadcaster" args="0 1.89 0.83 -0.5 0.5 -0.5 0.5 world kinect2_link" /> -->
+	        <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="static_tf_broadcaster" args="0 0.55 -1.89 -0.5 0.5 -0.5 0.5 temp_world kinect2_link" /> -->
+	        <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="static_tf_broadcaster" args="0 0 0 0.707 0 0 0.707 world temp_world" /> -->
 	        <!-- <node name="lighthouse_ros" pkg="NASA_ARMS" type="steam_runtime.sh"/> -->
 	        <node pkg="pointcloud_obstacle_processing" name="obstacle_detection" type="pointcloud_obstacle_detection" output="screen"/>
 

@@ -81,6 +81,7 @@ const char *point_topic = "/kinect2/qhd/points";
 
 int frames_to_accumulate;
 int current_frame_count;
+int grid_opacity;
 
 
 float block_size;
@@ -502,10 +503,12 @@ void traceShadow(const Vertex& v1, const Vertex& v2, char* occupancy_grid_data)
       // part of y co-ordinate
       int grid_y = x;
       int grid_x = (int)std::floor(intersectY);
+      int occ_grid_index = grid_y*occupancy_grid_width + grid_x;
 
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
-      grid_x += 1;
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
+      if(occ_grid_index < occupancy_grid_size && occ_grid_index > -1) occupancy_grid_data[occ_grid_index] = grid_opacity;
+      occ_grid_index += 1;
+
+      if(occ_grid_index < occupancy_grid_size && occ_grid_index > -1 ) occupancy_grid_data[occ_grid_index] = grid_opacity;
 
       intersectY += gradient;
     }
@@ -521,9 +524,12 @@ void traceShadow(const Vertex& v1, const Vertex& v2, char* occupancy_grid_data)
       int grid_y = (int)std::floor(intersectY);
       int grid_x = x;
 
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
-      grid_y += 1;
-      occupancy_grid_data[grid_y*occupancy_grid_width + grid_x] = 0;
+      int occ_grid_index = grid_y*occupancy_grid_width + grid_x;
+
+      if (occ_grid_index < occupancy_grid_size && occ_grid_index > -1) occupancy_grid_data[occ_grid_index] = grid_opacity;
+      occ_grid_index += 1;
+
+      if (occ_grid_index < occupancy_grid_size && occ_grid_index > -1) occupancy_grid_data[occ_grid_index] = grid_opacity;
 
       intersectY += gradient;
     }
@@ -537,11 +543,9 @@ std::pair<int, int> calculate_shadow_cast(char *occupancy_grid_data,
   float a = vertical_min_pt.z;
   float b = fabs(vertical_min_pt.x);
   float c = sqrt(a * a + b * b);
-  float e = fabs(vertical_max) - fabs(vertical_min_pt.x);
+  float e = fabs(vertical_max) - fabs(vertical_min_pt.x) + 0.04;
   float D = asin(a / c);
   float d = tan(D) * e + 0.25;
-
-  width = horizontal_max - horizontal_min;
 
   ROS_ERROR("distance of shadow: %f", d);
   ROS_ERROR("width of obstacle: %f", width);
@@ -605,7 +609,7 @@ void handle_shadow_casting(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_clou
   float vertical_axis_max = transformed_point_cloud.points[0].x;
   float horizontal_axis_min = transformed_point_cloud.points[0].y;
   float horizontal_axis_max = transformed_point_cloud.points[0].y;
-  float width = 0;
+
 
   for (int i = 1; i < transformed_point_cloud.points.size(); i++)
   {
@@ -620,7 +624,8 @@ void handle_shadow_casting(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_clou
   ROS_ERROR("horizontal_axis_min: %f", horizontal_axis_min);
   ROS_ERROR("horizontal_axis_max: %f", horizontal_axis_max);
 
-
+  float width = fabs(horizontal_axis_max - horizontal_axis_min);
+  //vertical_axis_min_pt.y = horizontal_axis_max;
 
   // kinect2 frame input, world frame output
   std::pair<int, int> end_line_grid_xy = calculate_shadow_cast(occupancy_grid_data, transformed_point_cloud.makeShared(), horizontal_axis_min, horizontal_axis_max, vertical_axis_min_pt, vertical_axis_max, width);
@@ -642,16 +647,27 @@ void handle_shadow_casting(const pcl::PointCloud<pcl::PointXYZ>::Ptr &input_clou
   ROS_ERROR("line_start_point: %f, %f", transformed_start_point_cloud.points[0].x, transformed_start_point_cloud.points[0].y);
   ROS_ERROR("occupancy_grid start_point: %d, %d", start_line_grid_xy.first, start_line_grid_xy.second);
 
-  Vertex v1, v2;
-  v1.x = start_line_grid_xy.first;
-  v1.y = start_line_grid_xy.second;
+  start_line_grid_xy.first += ceil((width/block_size) / 2);
+  end_line_grid_xy.first   += ceil((width/block_size) / 2);
 
-  v2.x = end_line_grid_xy.first;
-  v2.y = end_line_grid_xy.second;
+  for (int i = 0; i < ceil(width / block_size) + 3; i++)
+  {
 
-  ROS_ERROR("line end points: %d, %d", end_line_grid_xy.first, end_line_grid_xy.second);
+    Vertex v1, v2;
+    v1.x = start_line_grid_xy.first;
+    v1.y = start_line_grid_xy.second;
 
-  traceShadow(v1, v2, occupancy_grid_data);
+    v2.x = end_line_grid_xy.first;
+    v2.y = end_line_grid_xy.second;
+    ROS_ERROR("line start points: %d, %d", start_line_grid_xy.first, start_line_grid_xy.second);
+    ROS_ERROR("line end points: %d, %d", end_line_grid_xy.first, end_line_grid_xy.second);
+
+    traceShadow(v1, v2, occupancy_grid_data);
+
+    start_line_grid_xy.first -= 1;
+    end_line_grid_xy.first -= 1;
+  }
+
 
 }
 
@@ -927,6 +943,7 @@ int main (int argc, char** argv)
   nh.param("downsample_input_data", downsample_input_data, true);  // make the dataset smaller (and faster to process)
   nh.param("passthrough_filter_enable", passthrough_filter_enable, true);  // do we wanna cut things out? (useful for trimming the points down to the dimensions of the field)
   nh.param("publish_point_clouds", publish_point_clouds, true);
+  nh.param("grid_opacity", grid_opacity, 0);
 
   nh_pub.param("x_min", pt_lower_lim_x, (float) -1.0);  // lower lim on x axis for passthrough filter
   nh_pub.param("x_max", pt_upper_lim_x, (float) 1.0);  // upper lim on x axis for passthrough filter

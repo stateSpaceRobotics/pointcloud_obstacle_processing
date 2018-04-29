@@ -10,6 +10,7 @@ pointcloud_obstacle_processing:
                 accumulate_count: 200
                 block_size: 0.0375
                 dev_percent: 0.9
+                grid_opacity: 0
 
                 downsame_input_data: true
                 downsample_size: 0.015
