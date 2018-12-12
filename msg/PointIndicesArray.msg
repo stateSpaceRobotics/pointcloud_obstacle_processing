@@ -1,1 +1,0 @@
-PointWithRad[] points

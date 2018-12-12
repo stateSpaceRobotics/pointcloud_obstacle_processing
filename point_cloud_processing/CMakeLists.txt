@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(pointcloud_obstacle_processing)
+project(point_cloud_processing)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++11)
@@ -12,13 +12,13 @@ set(CATKIN_DEVEL_PREFIX "$ENV{HOME}/catkin_ws/devel")
 
 find_package(PCL REQUIRED)
 find_package(catkin REQUIRED COMPONENTS
-##  kinect2_bridge
-  pcl_ros
-  sensor_msgs
-  roscpp
-  rospy
-  std_msgs
-  message_generation
+#   kinect2_bridge
+    pcl_ros
+    sensor_msgs
+    roscpp
+    rospy
+    std_msgs
+    message_generation
 )
 
 ## System dependencies are found with CMake's conventions
@@ -40,10 +40,10 @@ find_package(catkin REQUIRED COMPONENTS
 ##   your messages/services/actions (e.g. std_msgs, actionlib_msgs, ...).
 ## * In the file package.xml:
 ##   * add a build_depend tag for "message_generation"
-##   * add a build_depend and a run_depend tag for each package in MSG_DEP_SET
+##   * add a build_depend and a exec_depend tag for each package in MSG_DEP_SET
 ##   * If MSG_DEP_SET isn't empty the following dependency has been pulled in
 ##     but can be declared for certainty nonetheless:
-##     * add a run_depend tag for "message_runtime"
+##     * add a exec_depend tag for "message_runtime"
 ## * In this file (CMakeLists.txt):
 ##   * add "message_generation" and every package in MSG_DEP_SET to
 ##     find_package(catkin REQUIRED COMPONENTS ...)
@@ -54,14 +54,12 @@ find_package(catkin REQUIRED COMPONENTS
 ##   * uncomment the generate_messages entry below
 ##   * add every package in MSG_DEP_SET to generate_messages(DEPENDENCIES ...)
 
-
-
 ## Generate messages in the 'msg' folder
-add_message_files(
-   FILES
-   PointIndicesArray.msg
-   PointWithRad.msg
-)
+# add_message_files(
+#   FILES
+#   Message1.msg
+#   Message2.msg
+# )
 
 ## Generate services in the 'srv' folder
 # add_service_files(
@@ -79,10 +77,10 @@ add_message_files(
 
 ## Generate added messages and services with any dependencies listed here
 generate_messages(
-   DEPENDENCIES
-   std_msgs
-   sensor_msgs
- )
+    DEPENDENCIES
+    std_msgs
+    sensor_msgs
+)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -91,7 +89,7 @@ generate_messages(
 ## To declare and build dynamic reconfigure parameters within this
 ## package, follow these steps:
 ## * In the file package.xml:
-##   * add a build_depend and a run_depend tag for "dynamic_reconfigure"
+##   * add a build_depend and a exec_depend tag for "dynamic_reconfigure"
 ## * In this file (CMakeLists.txt):
 ##   * add "dynamic_reconfigure" to
 ##     find_package(catkin REQUIRED COMPONENTS ...)
@@ -109,33 +107,40 @@ generate_messages(
 ###################################
 ## The catkin_package macro generates cmake config files for your package
 ## Declare things to be passed to dependent projects
-## INCLUDE_DIRS: uncomment this if you package contains header files
+## INCLUDE_DIRS: uncomment this if your package contains header files
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-  INCLUDE_DIRS minibot_cr18/include
-  LIBRARIES pointcloud_obstacle_processing
-  CATKIN_DEPENDS roscpp rospy std_msgs message_runtime
-  #DEPENDS system_lib
+    INCLUDE_DIRS include
+    LIBRARIES point_cloud_processing
+    CATKIN_DEPENDS roscpp std_msgs message_runtime
+#  DEPENDS system_lib
 )
 
 ###########
 ## Build ##
 ###########
-include_directories(${PCL_INCLUDE_DIRS})
-link_directories(${PCL_LIBRARY_DIRS})
-add_definitions(${PCL_DEFINITIONS})
+
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-# include
-  ${catkin_INCLUDE_DIRS}
+    include
+    ${catkin_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+)
+
+link_directories(
+    ${PCL_LIBRARY_DIRS}
+)
+
+add_definitions(
+    ${PCL_DEFINITIONS}
 )
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/NASA_ARMS.cpp
+#   src/${PROJECT_NAME}/point_cloud_processing.cpp
 # )
 
 ## Add cmake target dependencies of the library
@@ -146,7 +151,7 @@ include_directories(
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-# add_executable(${PROJECT_NAME}_node src/NASA_ARMS_node.cpp)
+# add_executable(${PROJECT_NAME}_node src/point_cloud_processing_node.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -203,7 +208,7 @@ include_directories(
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_NASA_ARMS.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_point_cloud_processing.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()
@@ -211,9 +216,5 @@ include_directories(
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
 
-include_directories(include ${catkin_INCLUDE_DIRS})
-
-add_executable(pointcloud_obstacle_detection minibot_cr18/src/obstacle_detection.cpp)
-target_link_libraries(pointcloud_obstacle_detection ${catkin_LIBRARIES} ${PCL_LIBRARIES})
-
-
+add_executable(point_cloud_processing src/point_cloud_processing.cpp)
+target_link_libraries(point_cloud_processing ${catkin_LIBRARIES} ${PCL_LIBRARIES})
