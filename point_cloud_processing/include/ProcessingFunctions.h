@@ -28,9 +28,11 @@
 namespace CloudProcessing
 {
     //Transform the given point cloud using the given transform
-    void Transform()
+    void Transform(const pcl::PointCloud<pcl::PointXYZ>::Ptr& inCloud, pcl::<pcl::PointXYZ>& outCloud, geometry_msgs::TransformStamped t)
     {
-        
+        tf::StampedTransform transform;
+        tf::transformStampedMsgToTF(t, transform);
+        pcl_ros::transformPointCloud(inCloud, outCloud, transform);
     }
 
     //Downsample the point cloud
