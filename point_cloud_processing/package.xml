@@ -57,13 +57,13 @@
   <build_depend>pcl_msgs</build_depend>
   <build_depend>libpcl-all-dev</build_depend>
   <build_depend>message_generation</build_depend>
-  <!--<run_depend>libpcl-all</run_depend>-->
-  <!-- <run_depend>kinect2_bridge</run_depend> -->
-  <!--<run_depend>pcl_ros</run_depend>-->
-  <!--<run_depend>roscpp</run_depend>-->
-  <!--<run_depend>rospy</run_depend>-->
-  <!--<run_depend>std_msgs</run_depend>-->
-  <!--<run_depend>message_runtime</run_depend>-->
+  <exec_depend>libpcl-all</exec_depend>
+  <exec_depend>kinect2_bridge</exec_depend>
+  <exec_depend>pcl_ros</exec_depend>
+  <exec_depend>roscpp</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>message_runtime</exec_depend>
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>

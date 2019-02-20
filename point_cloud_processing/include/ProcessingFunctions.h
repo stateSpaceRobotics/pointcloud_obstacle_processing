@@ -25,53 +25,46 @@
 #include <pcl_ros/transforms.h>
 #include <tf/transform_datatypes.h>
 
-namespace CloudProcessing
+namespace ProcessingFunctions
 {
     //Transform the given point cloud using the given transform
-    void Transform(const pcl::PointCloud<pcl::PointXYZ>::Ptr& inCloud, pcl::<pcl::PointXYZ>& outCloud, geometry_msgs::TransformStamped t)
+    void Transform(const pcl::PointCloud<pcl::PointXYZ>::Ptr& inCloud, pcl::PointCloud<pcl::PointXYZ>::Ptr& outCloud, geometry_msgs::TransformStamped t)
     {
         tf::StampedTransform transform;
         tf::transformStampedMsgToTF(t, transform);
-        pcl_ros::transformPointCloud(inCloud, outCloud, transform);
+        pcl_ros::transformPointCloud(*inCloud, *outCloud, transform);
     }
 
-    //Downsample the point cloud
-    void Downsample(const pcl::PointCloud<pcl::PointXYZ>::Ptr& inCloud, pcl::<pcl::PointXYZ>& outCloud, float leafSize, ros::Publisher &publisher, bool publish = false)
+    void Filter(const pcl::PointCloud<pcl::PointXYZ>::Ptr& inCloud, pcl::PointCloud<pcl::PointXYZ>::Ptr& outCloud, double xmin, double xmax, double ymin, double ymax, double zmin, double zmax)
     {
-        pcl::VoxelGrid<pcl::PointXYZ> sor;
-        sor.setInputCloud (input_cloud);
-        sor.setLeafSize(leaf_size, leaf_size, leaf_size);
-        sor.filter (output_cloud);
+        for(int i = 0; i < inCloud->points.size(); i++)
+        {
+            pcl::PointXYZ point = inCloud->points[i];
 
-        if (!publish) return;
-    }
+            if(point.x < xmin || point.x > xmax ||
+               point.y < ymin || point.y > ymax || 
+               point.z < zmin || point.z > zmax)
+               continue;
 
-    //Remove any statistical outliers
-    void RemoveStatisticalOutliers(pcl::PointCloud<pcl::PointXYZ>::Ptr& inCloud, pcl::PointCloud<pcl::PointXYZ>& outCloud, float meanK, float stdDeviationThreshold, ros::Publisher &publisher, bool publish = false)
-    {
-        pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
-        sor.setInputCloud(input_cloud);
-        sor.setMeanK(meanK);
-        sor.setStddevMulThresh(stdDevThres);
-        sor.filter(output_cloud);
-
-        if (!publish) return;
+            outCloud->push_back(point);
+        }
     }
 
     //Segment away the specified plane
-    void SegmentPlane(pcl::PointCloud<pcl::PointXYZ>::Ptr& inCloud, pcl::PointCloud<pcl::PointXYZ>& outCloud, float distanceThreshold, ros::Publisher &publisher)
+    void SegmentPlane(pcl::PointCloud<pcl::PointXYZ>::Ptr& inCloud, pcl::PointCloud<pcl::PointXYZ>::Ptr& outCloud)
     {
         pcl::SACSegmentation<pcl::PointXYZ> seg;
         pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
         pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_plane(new pcl::PointCloud<pcl::PointXYZ>());
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_f (new pcl::PointCloud<pcl::PointXYZ>);
-        pcl::PCDWriter writer;
         seg.setOptimizeCoefficients (true);
         seg.setModelType (pcl::SACMODEL_PLANE);
         seg.setMethodType (pcl::SAC_RANSAC);
         seg.setMaxIterations (100);
-        seg.setDistanceThreshold (0.02);
+        seg.setAxis(Eigen::Vector3f(0, 0, 1));
+        seg.setDistanceThreshold (0.04);
+        seg.setEpsAngle(20);
 
         int nr_points = (int)inCloud->points.size();
 
@@ -105,4 +98,27 @@ namespace CloudProcessing
             *outCloud = *cloud_f;
         }
     }
+
+    // //Downsample the point cloud
+    // void Downsample(const pcl::PointCloud<pcl::PointXYZ>::Ptr& inCloud, pcl::<pcl::PointXYZ>& outCloud, float leafSize, ros::Publisher &publisher, bool publish = false)
+    // {
+    //     pcl::VoxelGrid<pcl::PointXYZ> sor;
+    //     sor.setInputCloud (input_cloud);
+    //     sor.setLeafSize(leaf_size, leaf_size, leaf_size);
+    //     sor.filter (output_cloud);
+
+    //     if (!publish) return;
+    // }
+
+    // //Remove any statistical outliers
+    // void RemoveStatisticalOutliers(pcl::PointCloud<pcl::PointXYZ>::Ptr& inCloud, pcl::PointCloud<pcl::PointXYZ>& outCloud, float meanK, float stdDeviationThreshold, ros::Publisher &publisher, bool publish = false)
+    // {
+    //     pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+    //     sor.setInputCloud(input_cloud);
+    //     sor.setMeanK(meanK);
+    //     sor.setStddevMulThresh(stdDevThres);
+    //     sor.filter(output_cloud);
+
+    //     if (!publish) return;
+    // }
 }
