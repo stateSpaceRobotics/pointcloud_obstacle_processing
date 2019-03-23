@@ -77,17 +77,17 @@ void PointCloudReceivedCallback(const sensor_msgs::PointCloud2ConstPtr& received
     //Publish the transformed cloud
     Publish(transformedCloud, transformedCloudPublisher);
 
-    //Filter out points that lie outside the bounds we're interested in
-    ProcessingFunctions::Filter(transformedCloud, filteredCloud, 0.0, 3.6322, 0.0, 10, 0.0, 0.5);
-
-    //Publish the filtered cloud
-    Publish(filteredCloud, filteredCloudPublisher);
-
     //Segment away the ground plane
-    ProcessingFunctions::SegmentPlane(filteredCloud, segmentedCloud);
+    ProcessingFunctions::SegmentPlane(transformedCloud, segmentedCloud);
 
     //Publish the segmented cloud
     Publish(segmentedCloud, segmentedCloudPublisher);
+
+    //Filter out points that lie outside the bounds we're interested in
+    ProcessingFunctions::Filter(segmentedCloud, filteredCloud, 0.0, 3.6322, 0.0, 10, 0.0, 0.5);
+
+    //Publish the filtered cloud
+    Publish(filteredCloud, filteredCloudPublisher);
 }
 
 void LoadParameters(ros::NodeHandle)

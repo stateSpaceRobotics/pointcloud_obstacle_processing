@@ -4,6 +4,12 @@
 
 //PCL specific includes
 #include <sensor_msgs/PointCloud2.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/common/transforms.h>
 
 // Occupancy Grid
 #include <nav_msgs/OccupancyGrid.h>
@@ -11,7 +17,7 @@
 ros::Publisher mapPublisher;
 
 //
-int GetGridIndex(pcl::PointXYZ p)
+int GetGridIndex(pcl::PointXYZ p, float mapBlockSize, float mapXMin, float mapYMax, int mapWidth)
 {
     /*
     TODO:
@@ -24,9 +30,23 @@ int GetGridIndex(pcl::PointXYZ p)
     Have fun!
     */
 
-   int index;
+    int index;          //index of the point
+    int xCount = 0;     //counter for x coordinate
+    int yCount = 0;     //counter for y coordinate
+    
+    while (mapXMin + (xCount + 1)*mapBlockSize < p.x)   //run through the x coordinates on the map? also p.x may not be syntactically correct
+    {
+        xCount++;       
+    }
 
-   return index;
+    while (mapYMax - (yCount + 1)*mapBlockSize > p.y)   //run through the y coordinates on the map? also p.y may not be syntactically correct
+    {
+        yCount++;      
+    }
+
+    index = (yCount*mapWidth) + xCount;     //this is the math provided :]
+    
+    return index;
 }
 
 //This callback function receives the obstacle data from the point_cloud_processing node. We build and publish the map here.
@@ -44,30 +64,32 @@ void ObstacleCloudReceivedCallback(const sensor_msgs::PointCloud2ConstPtr& recei
 
     for(int i = 0; i < mapSize; i++) mapData[i] = 0;    //Cells are empty unless explicitly defined as not empty
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PoinrtCloud<pcl::PointXYZ>);
+    //HEY LOOK HERE AT THIS
+    //MAKE SURE THIS IS NOT A TYPO
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::fromROSMsg(*receivedPointCloud, *cloud);
 
     //This will loop over all of the points that correspond to obstacles.
     for(int i = 0; i < cloud->points.size(); i++)
     {
-       int gridIndex = GetGridIndex(cloud->points[i]);
+       int gridIndex = GetGridIndex(cloud->points[i], mapBlockSize, mapXMin, mapYMax, mapWidth);
        mapData[gridIndex] = 100;    //Really we should be doing probabilities, but for the sake of visualizing in RVIZ we set to 100 so that it shows up
     }
 
     //Configure the OccupancyGrid message
     nav_msgs::OccupancyGrid *map = new nav_msgs::OccupancyGrid();
-    occupancyGrid->info.resolution = mapBlockSize;
-    occupancyGrid->info.width = mapWidth;
-    occupancyGrid->info.height = mapHeight;
-    occupancyGrid->data = std::vector<int8_t>(mapData, mapData + mapSize);
-    occupancyGrid->header.frame_id = "world";
-    occupancyGrid->info.origin.orientation.w = 1;
-    occupancyGrid->info.origin.orientation.z = 0;
-    occupancyGrid->info.origin.orientation.y = 0;
-    occupancyGrid->info.origin.orientation.x = 0;
-    occupancyGrid->info.origin.position.x = 0;
-    occupancyGrid->info.origin.position.y = 0;
-    occupancyGrid->info.origin.position.z = 0;
+    map->info.resolution = mapBlockSize;
+    map->info.width = mapWidth;
+    map->info.height = mapHeight;
+    map->data = std::vector<int8_t>(mapData, mapData + mapSize);
+    map->header.frame_id = "world";
+    map->info.origin.orientation.w = 0;
+    map->info.origin.orientation.z = 0;
+    map->info.origin.orientation.y = 0;
+    map->info.origin.orientation.x = 1;
+    map->info.origin.position.x = 0;
+    map->info.origin.position.y = mapYMax;
+    map->info.origin.position.z = 0;
 
     //Publish the map
     mapPublisher.publish(*map);
@@ -88,7 +110,7 @@ int main(int argc, char** argv)
     mapPublisher = nh.advertise<nav_msgs::OccupancyGrid>("map", 1);
 
     //The topic to subscribe to. From the point_cloud_processing node
-    const char *obstacles_topic = "/segmentedCloud";
+    const char *obstacles_topic = "/point_cloud_processing/filteredCloud";
 
     // Create a ROS subscriber for the input point cloud that contains the obstacle points
     ros::Subscriber sub = nh.subscribe (obstacles_topic, 1, ObstacleCloudReceivedCallback);

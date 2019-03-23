@@ -59,12 +59,12 @@ namespace ProcessingFunctions
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_plane(new pcl::PointCloud<pcl::PointXYZ>());
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_f (new pcl::PointCloud<pcl::PointXYZ>);
         seg.setOptimizeCoefficients (true);
-        seg.setModelType (pcl::SACMODEL_PLANE);
+        seg.setModelType (pcl::SACMODEL_PERPENDICULAR_PLANE);
         seg.setMethodType (pcl::SAC_RANSAC);
         seg.setMaxIterations (100);
         seg.setAxis(Eigen::Vector3f(0, 0, 1));
         seg.setDistanceThreshold (0.04);
-        seg.setEpsAngle(20);
+        seg.setEpsAngle(0.3488);
 
         int nr_points = (int)inCloud->points.size();
 

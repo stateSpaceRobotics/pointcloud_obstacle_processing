@@ -1,0 +1,4 @@
+<launch>
+    <include file="$(find mapping)/launch/mapping.launch"/>
+    <include file="$(find point_cloud_processing)/launch/point_cloud_processing.launch"/>
+</launch>

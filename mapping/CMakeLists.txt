@@ -2,12 +2,21 @@ cmake_minimum_required(VERSION 2.8.3)
 project(mapping)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
+add_compile_options(-std=c++11)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
-find_package(catkin REQUIRED)
+find_package(PCL REQUIRED)
+find_package(catkin REQUIRED COMPONENTS
+#   kinect2_bridge
+    pcl_ros
+    sensor_msgs
+    roscpp
+    rospy
+    std_msgs
+    message_generation
+)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -64,10 +73,11 @@ find_package(catkin REQUIRED)
 # )
 
 ## Generate added messages and services with any dependencies listed here
-# generate_messages(
-#   DEPENDENCIES
-#   std_msgs  # Or other packages containing msgs
-# )
+#generate_messages(
+#    DEPENDENCIES
+#    std_msgs
+#    sensor_msgs
+#)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -99,9 +109,9 @@ find_package(catkin REQUIRED)
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES mapping
-#  CATKIN_DEPENDS other_catkin_pkg
+    #INCLUDE_DIRS include
+    LIBRARIES mapping
+    CATKIN_DEPENDS roscpp std_msgs message_runtime
 #  DEPENDS system_lib
 )
 
@@ -112,8 +122,17 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-# include
-# ${catkin_INCLUDE_DIRS}
+    #include
+    ${catkin_INCLUDE_DIRS}
+    ${PCL_INCLUDE_DIRS}
+)
+
+link_directories(
+    ${PCL_LIBRARY_DIRS}
+)
+
+add_definitions(
+    ${PCL_DEFINITIONS}
 )
 
 ## Declare a C++ library
@@ -193,3 +212,6 @@ include_directories(
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
+
+add_executable(mapping src/mapping.cpp)
+target_link_libraries(mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES})
