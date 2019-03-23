@@ -36,8 +36,7 @@
 //PointCloud Processing Functions
 #include "../include/ProcessingFunctions.h"
 
-//Parameter Structs
-//#include "../include/Parameters.h"
+
 
 
 //Parameters params;
