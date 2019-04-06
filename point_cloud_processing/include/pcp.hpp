@@ -30,7 +30,7 @@ class pcp {
 
         ros::Subscriber sub;
 
-        ros::Publisher transformCloudPublisher;
+        ros::Publisher transformedCloudPublisher;
         ros::Publisher segmentedCloudPublisher;
         ros::Publisher filteredCloudPublisher;
         

@@ -8,7 +8,7 @@ pcp::pcp(){
     
     // Create a ROS subscriber for the input point cloud
     const std::string point_topic = "/kinect2/qhd/points";
-    ros::Subscriber sub = this->nh.subscribe (point_topic, 1, &pcp::processingCB);
+    ros::Subscriber sub = this->nh.subscribe (point_topic, 1, &pcp::processingCB, this);
 }
 
 void pcp::init(){
@@ -30,7 +30,7 @@ void pcp::init(){
     this->nh.param<std::string>("eps_angle", this->Params["eps_angle"], "0.0");
     this->nh.param<std::string>("publish_trans_cloud", this->Params["publish_trans_cloud"], "0");
     this->nh.param<std::string>("publish_filtered_cloud", this->Params["publish_filtered_cloud"], "0");
-    this->transformCloudPublisher = this->nh.advertise<sensor_msgs::PointCloud2>("transformedCloud", 1);
+    this->transformedCloudPublisher = this->nh.advertise<sensor_msgs::PointCloud2>("transformedCloud", 1);
     this->segmentedCloudPublisher = this->nh.advertise<sensor_msgs::PointCloud2>("segmentedCloud", 1);
     this->filteredCloudPublisher = this->nh.advertise<sensor_msgs::PointCloud2>("filteredCloud", 1);
 
@@ -68,13 +68,13 @@ void pcp::processingCB(const sensor_msgs::PointCloud2ConstPtr& receivedPointClou
     ProcessingFunctions::Transform(newCloud, transformedCloud, tfBuffer.lookupTransform("world", "kinect2_link", ros::Time(0)));
 
     //Publish the transformed cloud
-    if((int)this->Params["publish_trans_cloud"]) Publish(transformedCloud, transformedCloudPublisher);
+    if(std::stoi(this->Params["publish_trans_cloud"])) Publish(transformedCloud, this->transformedCloudPublisher);
 
     //Filter out points that lie outside the bounds we're interested in
     ProcessingFunctions::Filter(transformedCloud, filteredCloud, 0.0, 3.6322, 0.0, 10, 0.0, 0.5);
 
     //Publish the filtered cloud
-    if((int)this->Params["publish_filtered_cloud"]) Publish(filteredCloud, filteredCloudPublisher);
+    if(std::stoi(this->Params["publish_filtered_cloud"])) Publish(filteredCloud, filteredCloudPublisher);
 
     //Segment away the ground plane
     ProcessingFunctions::SegmentPlane(filteredCloud, segmentedCloud);
