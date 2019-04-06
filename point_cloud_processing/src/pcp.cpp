@@ -4,23 +4,51 @@
 #include "../include/ProcessingFunctions.h"
 
 pcp::pcp(){
-    // Create a ROS subscriber for the input point cloud
-    ros::Subscriber sub = this->nh.subscribe ("/kinect2/qhd/points", 1, this->processingCB);
-
     this->init();
+    
+    // Create a ROS subscriber for the input point cloud
+    const std::string point_topic = "/kinect2/qhd/points";
+    ros::Subscriber sub = this->nh.subscribe (point_topic, 1, &pcp::processingCB);
 }
 
 void pcp::init(){
-    this->nh.param("x_min", this->Params["x_min"], "0.0");
-    this->nh.param("x_max", this->Params["x_max"], "4.0");
-    this->nh.param("y_min", this->Params["y_min"], "0.0");
-    this->nh.param("y_max", this->Params["y_max"], "6.0");
-    this->nh.param("z_min", this->Params["z_min"], "0.0");
-    this->nh.param("z_max", this->Params["z_max"], "0.5");
-    this->nh.param("distance_threshold", this->Params["distance_threshold"], "0.0");
-    this->nh.param("eps_angle", this->Params["eps_angle"], "0.0");
-    this->nh.param("publish_trans_cloud", this->Params["publish_trans_cloud"], "0");
-    this->nh.param("publish_filtered_cloud", this->Params["publish_filtered_cloud"], "0");
+
+    std::string x_min;
+    std::string x_max;
+    std::string y_min;
+    std::string y_max;
+    std::string z_min;
+    std::string z_max;
+
+    this->nh.param<std::string>("x_min", x_min, "0.0");
+    this->nh.param<std::string>("x_max", x_max, "4.0");
+    this->nh.param<std::string>("y_min", y_min, "0.0");
+    this->nh.param<std::string>("y_max", y_max, "6.0");
+    this->nh.param<std::string>("z_min", z_min, "0.0");
+    this->nh.param<std::string>("z_max", z_max, "0.5");
+    this->nh.param<std::string>("distance_threshold", this->Params["distance_threshold"], "0.0");
+    this->nh.param<std::string>("eps_angle", this->Params["eps_angle"], "0.0");
+    this->nh.param<std::string>("publish_trans_cloud", this->Params["publish_trans_cloud"], "0");
+    this->nh.param<std::string>("publish_filtered_cloud", this->Params["publish_filtered_cloud"], "0");
+    this->transformCloudPublisher = this->nh.advertise<sensor_msgs::PointCloud2>("transformedCloud", 1);
+    this->segmentedCloudPublisher = this->nh.advertise<sensor_msgs::PointCloud2>("segmentedCloud", 1);
+    this->filteredCloudPublisher = this->nh.advertise<sensor_msgs::PointCloud2>("filteredCloud", 1);
+
+    this->Params["x_min"] = x_min;
+    this->Params["x_max"] = x_max;
+    this->Params["y_min"] = y_min;
+    this->Params["y_max"] = y_max;
+    this->Params["z_min"] = z_min;
+    this->Params["z_max"] = z_max;
+}
+
+void pcp::Publish(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, ros::Publisher publisher) {
+    sensor_msgs::PointCloud2 publishCloud;
+
+    pcl::toROSMsg(*cloud, publishCloud);
+    publishCloud.header.frame_id = "world";
+    publishCloud.header.stamp = ros::Time::now();
+    publisher.publish(publishCloud);
 }
 
 void pcp::processingCB(const sensor_msgs::PointCloud2ConstPtr& receivedPointCloud){
@@ -52,7 +80,7 @@ void pcp::processingCB(const sensor_msgs::PointCloud2ConstPtr& receivedPointClou
     ProcessingFunctions::SegmentPlane(filteredCloud, segmentedCloud);
 
     //Publish the segmented cloud
-    Publish(segmentedCloud, segmentedCloudPublisher);
+    this->Publish(segmentedCloud, segmentedCloudPublisher);
 
 
 }

@@ -141,6 +141,7 @@ add_definitions(
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
 #   src/${PROJECT_NAME}/point_cloud_processing.cpp
+#   src/${PROJECT_NAME}/pcp.cpp
 # )
 
 ## Add cmake target dependencies of the library
@@ -216,5 +217,5 @@ add_definitions(
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
 
-add_executable(point_cloud_processing src/point_cloud_processing.cpp)
+add_executable(point_cloud_processing src/point_cloud_processing.cpp src/pcp.cpp)
 target_link_libraries(point_cloud_processing ${catkin_LIBRARIES} ${PCL_LIBRARIES})
