@@ -64,8 +64,6 @@ void ObstacleCloudReceivedCallback(const sensor_msgs::PointCloud2ConstPtr& recei
 
     for(int i = 0; i < mapSize; i++) mapData[i] = 0;    //Cells are empty unless explicitly defined as not empty
 
-    //HEY LOOK HERE AT THIS
-    //MAKE SURE THIS IS NOT A TYPO
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
     pcl::fromROSMsg(*receivedPointCloud, *cloud);
 
@@ -110,7 +108,7 @@ int main(int argc, char** argv)
     mapPublisher = nh.advertise<nav_msgs::OccupancyGrid>("map", 1);
 
     //The topic to subscribe to. From the point_cloud_processing node
-    const char *obstacles_topic = "/point_cloud_processing/filteredCloud";
+    const char *obstacles_topic = "/point_cloud_processing/segmentedCloud";
 
     // Create a ROS subscriber for the input point cloud that contains the obstacle points
     ros::Subscriber sub = nh.subscribe (obstacles_topic, 1, ObstacleCloudReceivedCallback);

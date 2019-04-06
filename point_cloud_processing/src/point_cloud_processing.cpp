@@ -15,5 +15,8 @@ int main(int argc, char** argv)
     pcp* processor = new pcp();
 
     ros::spin ();
+
+    delete processor;
+
     return 0;
 }

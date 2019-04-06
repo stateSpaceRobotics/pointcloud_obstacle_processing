@@ -8,7 +8,11 @@ pcp::pcp(){
     
     // Create a ROS subscriber for the input point cloud
     const std::string point_topic = "/kinect2/qhd/points";
-    ros::Subscriber sub = this->nh.subscribe (point_topic, 1, &pcp::processingCB, this);
+    this->sub = this->nh.subscribe (point_topic, 1, &pcp::processingCB, this);
+}
+
+pcp::~pcp(){
+    delete this->tfListener;
 }
 
 void pcp::init(){
@@ -33,6 +37,8 @@ void pcp::init(){
     this->transformedCloudPublisher = this->nh.advertise<sensor_msgs::PointCloud2>("transformedCloud", 1);
     this->segmentedCloudPublisher = this->nh.advertise<sensor_msgs::PointCloud2>("segmentedCloud", 1);
     this->filteredCloudPublisher = this->nh.advertise<sensor_msgs::PointCloud2>("filteredCloud", 1);
+
+    this->tfListener = new tf2_ros::TransformListener(this->tfBuffer);
 
     this->Params["x_min"] = x_min;
     this->Params["x_max"] = x_max;
@@ -65,7 +71,7 @@ void pcp::processingCB(const sensor_msgs::PointCloud2ConstPtr& receivedPointClou
     delete initial;    
 
     //Transform the pointcloud to the global coordinate frame
-    ProcessingFunctions::Transform(newCloud, transformedCloud, tfBuffer.lookupTransform("world", "kinect2_link", ros::Time(0)));
+    ProcessingFunctions::Transform(newCloud, transformedCloud, this->tfBuffer.lookupTransform("world", "kinect2_link", ros::Time(0)));
 
     //Publish the transformed cloud
     if(std::stoi(this->Params["publish_trans_cloud"])) Publish(transformedCloud, this->transformedCloudPublisher);
@@ -81,6 +87,4 @@ void pcp::processingCB(const sensor_msgs::PointCloud2ConstPtr& receivedPointClou
 
     //Publish the segmented cloud
     this->Publish(segmentedCloud, segmentedCloudPublisher);
-
-
 }

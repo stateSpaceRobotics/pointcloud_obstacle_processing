@@ -1,6 +1,3 @@
-//Parameter Structs
-#include "../include/Parameters.h"
-
 //PCL specific includes
 #include <sensor_msgs/PointCloud2.h>
 #include <pcl/point_cloud.h>
@@ -34,6 +31,7 @@ class pcp {
         ros::Publisher segmentedCloudPublisher;
         ros::Publisher filteredCloudPublisher;
         
+        tf2_ros::TransformListener* tfListener;
         tf2_ros::Buffer tfBuffer;
 
         std::map<std::string, std::string> Params;
